@@ -1,0 +1,2 @@
+Hello, RAG world.
+This is a sample document for testing loaders.
