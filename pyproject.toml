@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ragproject"
+version = "0.0.1"
+description = "A modular, testable RAG system"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["ruff", "mypy", "pytest", "pytest-cov", "pre-commit"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]  # errors, pyflakes, import-sort, pyupgrade, bugbear
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --cov=ragproject --cov-report=term-missing"
+markers = ["integration: tests that need real services (deselect with -m 'not integration')"]
