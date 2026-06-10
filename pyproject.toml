@@ -7,10 +7,10 @@ name = "ragproject"
 version = "0.0.1"
 description = "A modular, testable RAG system"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["fastapi>=0.115"]
 
 [project.optional-dependencies]
-dev = ["ruff", "mypy", "pytest", "pytest-cov", "pre-commit"]
+dev = ["ruff", "mypy", "pytest", "pytest-cov", "pre-commit", "httpx"]
 
 [tool.ruff]
 line-length = 100
