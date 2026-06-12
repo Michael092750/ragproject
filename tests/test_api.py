@@ -119,6 +119,13 @@ def test_debug_chunks_disabled_when_no_key_configured(
     assert client.get("/debug/chunks", headers={"X-Debug-Key": "anything"}).status_code == 404
 
 
+def test_debug_ui_page_is_served(client: TestClient) -> None:
+    response = client.get("/debug-ui")
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "Indexed chunks" in response.text
+
+
 def test_query_missing_question_is_422(client: TestClient) -> None:
     assert client.post("/query", json={}).status_code == 422
 

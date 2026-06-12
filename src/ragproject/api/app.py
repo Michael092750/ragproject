@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, UploadFile
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from ragproject.api.deps import get_pipeline
@@ -107,6 +108,64 @@ def list_chunks(pipeline: Pipeline, limit: int = 100) -> ChunksResponse:
         for chunk_id, metadata in items
     ]
     return ChunksResponse(count=len(chunks), chunks=chunks)
+
+
+_DEBUG_UI_HTML = """<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>ragproject - debug</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; }
+    input, button { padding: .5rem; font-size: 1rem; }
+    table { border-collapse: collapse; margin-top: 1rem; width: 100%; }
+    th, td { border: 1px solid #ccc; padding: .5rem; text-align: left; vertical-align: top; }
+    th { background: #f3f3f3; }
+    .err { color: #b00; }
+  </style>
+</head>
+<body>
+  <h1>Indexed chunks</h1>
+  <input id="key" type="password" placeholder="debug key" size="30">
+  <button onclick="load()">Load chunks</button>
+  <p id="status"></p>
+  <table id="tbl">
+    <thead><tr><th>#</th><th>source</th><th>text</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <script>
+    async function load() {
+      const key = document.getElementById('key').value;
+      const status = document.getElementById('status');
+      const tbody = document.querySelector('#tbl tbody');
+      tbody.innerHTML = '';
+      status.textContent = 'Loading...';
+      try {
+        const res = await fetch('/debug/chunks', { headers: { 'X-Debug-Key': key } });
+        if (!res.ok) {
+          status.className = 'err';
+          status.textContent = 'Error ' + res.status + ' - check your key';
+          return;
+        }
+        const data = await res.json();
+        status.className = ''; status.textContent = data.count + ' chunk(s)';
+        data.chunks.forEach((c, i) => {
+          const tr = document.createElement('tr');
+          [String(i + 1), c.source || '', c.text].forEach(v => {
+            const td = document.createElement('td'); td.textContent = v; tr.appendChild(td);
+          });
+          tbody.appendChild(tr);
+        });
+      } catch (e) { status.className = 'err'; status.textContent = String(e); }
+    }
+  </script>
+</body>
+</html>"""
+
+
+@app.get("/debug-ui", include_in_schema=False, response_class=HTMLResponse)
+def debug_ui() -> str:
+    return _DEBUG_UI_HTML
 
 
 @app.post("/query")
