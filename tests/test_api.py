@@ -32,9 +32,31 @@ def test_health() -> None:
     assert TestClient(app).get("/health").json() == {"status": "ok"}
 
 
-def test_default_pipeline_is_constructed() -> None:
-    # Exercises the real wiring (not the test override).
+def test_get_pipeline_uses_in_memory_without_database_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    get_pipeline.cache_clear()
     assert isinstance(get_pipeline(), RagPipeline)
+    get_pipeline.cache_clear()
+
+
+def test_get_pipeline_uses_pgvector_when_database_url_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorded: dict[str, object] = {}
+
+    class FakePg:
+        def __init__(self, dsn: str, dim: int) -> None:
+            recorded["dsn"] = dsn
+            recorded["dim"] = dim
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@host/db")
+    monkeypatch.setattr("ragproject.api.deps.PgVectorStore", FakePg)
+    get_pipeline.cache_clear()
+    assert isinstance(get_pipeline(), RagPipeline)
+    assert recorded["dsn"] == "postgresql://u:p@host/db"
+    get_pipeline.cache_clear()
 
 
 def test_ingest_then_query(client: TestClient) -> None:
