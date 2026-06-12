@@ -1,0 +1,26 @@
+# Local development services. Start with:  docker compose up -d
+# Stop with:                                docker compose down
+# Stop and wipe data:                       docker compose down -v
+services:
+  db:
+    # Prebuilt Postgres image with the pgvector extension already installed.
+    image: pgvector/pgvector:pg16
+    container_name: ragproject_db
+    environment:
+      POSTGRES_USER: rag
+      POSTGRES_PASSWORD: ragpass
+      POSTGRES_DB: ragproject
+    ports:
+      # host:container -> reach the DB from your app at localhost:5432
+      - "5432:5432"
+    volumes:
+      # Named volume keeps the data on disk so it survives `docker compose down`.
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag -d ragproject"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pg_data:
