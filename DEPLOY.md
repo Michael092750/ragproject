@@ -69,6 +69,11 @@ cdk deploy -c my_ip=$myip --require-approval never
 
 Note the **outputs** it prints: `PublicIp`, `InstanceId`, and `GetSshKeyCommand`.
 
+> **`cdk deploy` only creates the empty server — it does NOT put your app on it.**
+> The app (code + containers) is deployed separately in **Step 5**. After
+> `cdk deploy` you must continue through Steps 3-5, or the instance will be
+> running with nothing on it (no `/health`, no app, no `.env`/debug key).
+
 > **Always pass `-c my_ip=$myip`.** It locks SSH (port 22) to your IP. If you run
 > a bare `cdk deploy`, `my_ip` defaults to `0.0.0.0` and SSH is locked to nobody
 > (`0.0.0.0/32`) — you'll get `Connection timed out` in Step 4/5.
@@ -119,7 +124,11 @@ When all three print versions, it's ready. (`ec2-user` is the Amazon Linux login
 
 ---
 
-## Step 5 — Deploy the application code
+## Step 5 — Deploy the application code (REQUIRED)
+
+This is the step that actually puts your app on the server created in Step 2:
+bundle the code, upload it, write the `.env`, and start the containers. Skipping
+this leaves an empty VM. Run it again whenever your app code changes.
 
 From the **repo root** **(Git Bash)**:
 
