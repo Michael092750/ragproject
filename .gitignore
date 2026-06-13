@@ -9,3 +9,5 @@ __pycache__/
 htmlcov/
 .env
 .DS_Store
+cdk.out/
+*.pem
