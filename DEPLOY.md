@@ -116,14 +116,27 @@ git archive --format=tar.gz -o /tmp/app.tar.gz HEAD
 # 2. upload:
 scp $SSHO /tmp/app.tar.gz $HOST:/home/ec2-user/
 
+# Pick your own debug key, or let it generate a random one:
+DKEY=${DEBUG_API_KEY:-$(openssl rand -hex 16)}
+echo "DEBUG_API_KEY = $DKEY"     # <-- copy this; it guards the /debug/* endpoints
+
 # 3. unpack, write .env (Bedrock on), start the stack:
 ssh $SSHO $HOST "rm -rf ragproject && mkdir ragproject && tar xzf app.tar.gz -C ragproject && \
-  printf 'RAG_PROVIDER=bedrock\nAWS_REGION=us-east-1\nDEBUG_API_KEY=%s\n' \"\$(openssl rand -hex 16)\" > ragproject/.env && \
+  printf 'RAG_PROVIDER=bedrock\nAWS_REGION=us-east-1\nDEBUG_API_KEY=%s\n' '$DKEY' > ragproject/.env && \
   cd ragproject && docker compose up -d --build"
 ```
 
-First `--build` takes a few minutes. Note the generated `DEBUG_API_KEY` printed
-in the `.env` (needed for `/debug/*` endpoints).
+To use a **fixed** key (so it's the same every deploy), set it first:
+`export DEBUG_API_KEY=my-fixed-key-123`. Otherwise a random one is generated
+and printed by the `echo` above.
+
+### Finding the debug key for a running deployment
+
+The server's `.env` is the source of truth — retrieve it anytime:
+
+```bash
+ssh $SSHO $HOST "grep DEBUG_API_KEY ragproject/.env"
+```
 
 ---
 
