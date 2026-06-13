@@ -1,19 +1,35 @@
 # Deploying ragproject to AWS
 
-This is the runbook for deploying ragproject to a single EC2 instance running
-the Docker Compose stack (FastAPI app + Postgres/pgvector), with the
-infrastructure managed by **AWS CDK** (`infra/`).
+The deployment has **two independent parts**:
 
-Two lifecycles, kept separate:
+- **Infrastructure** — the EC2 server, network, IAM. Managed by **AWS CDK** (`infra/`).
+- **Application** — your code + Docker containers. Shipped by a **deploy script** (bundle → scp → `docker compose up`).
 
-- **Infrastructure** (the VM, network, IAM) — managed by CDK (`cdk deploy` / `cdk destroy`).
-- **Application code** — shipped with a bundle-and-compose step (Step 5).
+You almost always need **both**: `cdk deploy` creates an *empty server*; the app
+script puts your code on it.
 
-All commands are Windows PowerShell unless marked **(Git Bash)**.
+## Which section do I need?
+
+| Your situation | Go to |
+| --- | --- |
+| Deploying for the very first time | [1. First-time deployment](#1-first-time-deployment) |
+| Redeploying after `cdk destroy` | [2. Redeploy from scratch](#2-redeploy-from-scratch) |
+| Changed only app code, server is up | [3. Update the app](#3-update-the-app-only) |
+| Changed the infra (stack code) | [4. Update the infrastructure](#4-update-the-infrastructure) |
+| Need the debug key / IP / to SSH in | [5. Common tasks](#5-common-tasks) |
+| Something broke | [6. Troubleshooting](#6-troubleshooting) |
+| Stop the bill | [7. Tear down](#7-tear-down) |
+
+The actual command sequences live in [Procedures](#procedures) (A = infra, B = app);
+the sections below tell you which to run.
 
 ---
 
-## Prerequisites (install once)
+## 1. First-time deployment
+
+Do the one-time setup, then deploy.
+
+### 1a. Prerequisites (install once)
 
 | Tool | Check | Install |
 | --- | --- | --- |
@@ -23,27 +39,21 @@ All commands are Windows PowerShell unless marked **(Git Bash)**.
 | Python 3.11+ | `python --version` | <https://python.org> |
 | Docker Desktop | `docker --version` | for local testing |
 
-> After `npm install -g aws-cdk` (or installing Docker), the command won't be
-> found in the *same* terminal — open a **fresh terminal** and it works.
+> After installing a CLI, open a **fresh terminal** or it won't be found. If `cdk`
+> is still "not recognized," see [Troubleshooting](#6-troubleshooting).
 
----
+### 1b. AWS account setup (once)
 
-## Step 0 — AWS account setup (once)
+```powershell
+aws configure                 # access key, secret, region us-east-1
+aws sts get-caller-identity   # prints your account ARN if OK
+```
 
-1. Configure credentials and confirm they work:
-   ```powershell
-   aws configure                 # access key, secret, region us-east-1
-   aws sts get-caller-identity   # prints your account ARN if OK
-   ```
-2. Attach **`AdministratorAccess`** to your IAM user (CDK uses CloudFormation,
-   S3, SSM, IAM, EC2). Fine for a personal account; scope down for shared ones.
-3. Enable **Bedrock model access**: Console -> Bedrock -> Model access -> grant
-   Anthropic Claude + Amazon Titan Text Embeddings, and submit the Anthropic
-   use-case form.
+- Attach **`AdministratorAccess`** to your IAM user (CDK needs CloudFormation, S3, SSM, IAM, EC2).
+- Enable **Bedrock model access**: Console → Bedrock → Model access → grant Anthropic
+  Claude + Amazon Titan, and submit the Anthropic use-case form.
 
----
-
-## Step 1 — Bootstrap CDK (once per account + region)
+### 1c. Bootstrap CDK (once per account + region)
 
 ```powershell
 cd infra
@@ -53,134 +63,183 @@ pip install -r requirements.txt
 cdk bootstrap aws://<ACCOUNT_ID>/us-east-1
 ```
 
-Creates the `CDKToolkit` support stack. Done once; reused forever.
+### 1d. Deploy
+
+1. Run **[Procedure A — Deploy the infrastructure](#procedure-a--deploy-the-infrastructure)**
+2. Run **[Procedure B — Deploy the app](#procedure-b--deploy-the-app)**
+3. [Test](#test-any-deployment)
 
 ---
 
-## Step 2 — Deploy the infrastructure
+## 2. Redeploy from scratch
 
+After a `cdk destroy`, the one-time setup (1a–1c) is **already done** and persists.
+Just:
+
+1. Run **[Procedure A — Deploy the infrastructure](#procedure-a--deploy-the-infrastructure)**
+2. Run **[Procedure B — Deploy the app](#procedure-b--deploy-the-app)**
+3. [Test](#test-any-deployment)
+
+A fresh deploy creates a **new** public IP and SSH key — don't reuse the old ones.
+
+---
+
+## 3. Update the app only
+
+The server is already running and you changed app code. **No CDK needed** — just
+re-run **[Procedure B — Deploy the app](#procedure-b--deploy-the-app)**. It rebuilds
+the image and restarts the containers in place.
+
+---
+
+## 4. Update the infrastructure
+
+You edited `infra/ragproject_infra/ragproject_stack.py` (e.g. instance size).
+Re-run **[Procedure A](#procedure-a--deploy-the-infrastructure)** — CDK computes the
+diff and applies only what changed. Run `cdk diff -c my_ip=$myip` first to preview.
+
+---
+
+## 5. Common tasks
+
+> First set these in a **Git Bash** shell (used by several tasks):
+> ```bash
+> KEY=~/.ssh/ragproject-cdk-key.pem
+> HOST=ec2-user@<PUBLIC_IP>
+> SSHO="-o StrictHostKeyChecking=no -i $KEY"
+> ```
+
+**Find the running instance's public IP** (PowerShell):
 ```powershell
-# in infra/, with .venv active
-$myip = (Invoke-WebRequest https://checkip.amazonaws.com -UseBasicParsing).Content.Trim()
-
-cdk diff   -c my_ip=$myip                      # preview (optional)
-cdk deploy -c my_ip=$myip --require-approval never
+aws ec2 describe-instances --filters "Name=instance-state-name,Values=running" `
+  --query "Reservations[].Instances[].PublicIpAddress" --output text
 ```
 
-Note the **outputs** it prints: `PublicIp`, `InstanceId`, and `GetSshKeyCommand`.
+**Re-fetch the SSH key** (if you deleted the `.pem`) — get the param name from the
+stack outputs, then (PowerShell):
+```powershell
+$cmd = aws cloudformation describe-stacks --stack-name RagprojectStack `
+  --query "Stacks[0].Outputs[?OutputKey=='GetSshKeyCommand'].OutputValue" --output text
+$keyPath = "$HOME\.ssh\ragproject-cdk-key.pem"
+Invoke-Expression $cmd | Out-File -FilePath $keyPath -Encoding ascii
+icacls $keyPath /inheritance:r /grant:r "$($env:USERNAME):(R)"
+```
 
-> **`cdk deploy` only creates the empty server — it does NOT put your app on it.**
-> The app (code + containers) is deployed separately in **Step 5**. After
-> `cdk deploy` you must continue through Steps 3-5, or the instance will be
-> running with nothing on it (no `/health`, no app, no `.env`/debug key).
+**Retrieve the debug key** (the `X-Debug-Key` for `/debug/*`) — Git Bash:
+```bash
+ssh $SSHO $HOST "grep DEBUG_API_KEY ragproject/.env"
+```
+No output / no file? The app isn't deployed — run Procedure B.
 
-> **Always pass `-c my_ip=$myip`.** It locks SSH (port 22) to your IP. If you run
-> a bare `cdk deploy`, `my_ip` defaults to `0.0.0.0` and SSH is locked to nobody
-> (`0.0.0.0/32`) — you'll get `Connection timed out` in Step 4/5.
+**SSH into the box** — Git Bash:
+```bash
+ssh $SSHO $HOST
+```
 
-### Fix: SSH locked out (or your IP changed)
+---
 
-If SSH times out, open port 22 to your current IP on the instance's security group:
+## 6. Troubleshooting
 
+**`cdk : not recognized`** — npm's folder isn't on PATH. Quick fix (this terminal):
+```powershell
+$env:Path += ";$env:APPDATA\npm"
+```
+Permanent: add `%APPDATA%\npm` to your user PATH, then **fully restart VS Code**
+(a new terminal tab inherits VS Code's old PATH).
+
+**`ModuleNotFoundError: No module named 'aws_cdk'`** — you ran `cdk` without the
+**infra** venv active. `cd infra; .\.venv\Scripts\Activate.ps1` first. (Note: this is
+the *infra* venv, not the app's root `.venv`.)
+
+**SSH `Connection timed out`** — port 22 isn't open to your IP. Happens if you ran a
+bare `cdk deploy` (SSH locked to `0.0.0.0/32`) or your IP changed. Open it:
 ```powershell
 $myip = (Invoke-WebRequest https://checkip.amazonaws.com -UseBasicParsing).Content.Trim()
 $id  = aws ec2 describe-instances --filters "Name=instance-state-name,Values=running" --query "Reservations[0].Instances[0].InstanceId" --output text
 $sg  = aws ec2 describe-instances --instance-ids $id --query "Reservations[0].Instances[0].SecurityGroups[0].GroupId" --output text
 aws ec2 authorize-security-group-ingress --group-id $sg --protocol tcp --port 22 --cidr "$myip/32"
 ```
+Proper fix: redeploy with `-c my_ip=$myip` (CDK reverts manual SG edits next deploy).
 
-This is a manual quick-fix; the proper fix is to redeploy with `-c my_ip=$myip`
-(CDK reverts manual security-group edits on the next deploy).
+**No `.env` on the server / no `/health`** — you ran only `cdk deploy` (infra) and
+skipped the app. Run **[Procedure B](#procedure-b--deploy-the-app)**.
+
+**`compose build requires buildx ...`** — old Docker plugin. The CDK user-data
+installs a current buildx, so a fresh instance is fine; only relevant on hand-built boxes.
 
 ---
 
-## Step 3 — Fetch the SSH key
+## 7. Tear down
 
-CDK stored the private key in SSM Parameter Store. Run the printed
-`GetSshKeyCommand`, saving to a file:
+```powershell
+cd infra
+.\.venv\Scripts\Activate.ps1
+cdk destroy          # deletes the instance, security group, IAM role, key pair
+```
 
+Optional extra cleanup (only if fully done with AWS):
+```powershell
+aws iam detach-user-policy --user-name <you> --policy-arn arn:aws:iam::aws:policy/AdministratorAccess
+Remove-Item $HOME\.ssh\ragproject-cdk-key.pem -Force
+```
+Leave the `CDKToolkit` bootstrap stack — it's free and reused next time.
+
+---
+
+## Procedures
+
+### Procedure A — Deploy the infrastructure
+
+In `infra/`, with the **infra venv active** (`.\.venv\Scripts\Activate.ps1`):
+
+```powershell
+$myip = (Invoke-WebRequest https://checkip.amazonaws.com -UseBasicParsing).Content.Trim()
+cdk deploy -c my_ip=$myip --require-approval never
+```
+
+- **Always pass `-c my_ip=$myip`** — it locks SSH to your IP. A bare `cdk deploy`
+  locks SSH to nobody (`0.0.0.0/32`).
+- Note the outputs: **`PublicIp`**, **`InstanceId`**, **`GetSshKeyCommand`**.
+- This creates an **empty server** — you still need Procedure B.
+
+Then fetch the SSH key (run the printed `GetSshKeyCommand`, saving it):
 ```powershell
 $keyPath = "$HOME\.ssh\ragproject-cdk-key.pem"
 aws ssm get-parameter --name /ec2/keypair/<KEY_PAIR_ID> --with-decryption `
   --query Parameter.Value --output text | Out-File -FilePath $keyPath -Encoding ascii
 icacls $keyPath /inheritance:r /grant:r "$($env:USERNAME):(R)"
 ```
-
 > `-Encoding ascii` is required — PowerShell's default UTF-16 corrupts the key.
 
----
+### Procedure B — Deploy the app
 
-## Step 4 — Wait for Docker (boot script)
-
-The instance installs Docker via user-data on first boot (~1-2 min). Verify
-**(Git Bash)**, substituting the IP:
-
-```bash
-ssh -o StrictHostKeyChecking=no -i ~/.ssh/ragproject-cdk-key.pem \
-  ec2-user@<PUBLIC_IP> "docker --version && docker compose version && docker buildx version"
-```
-
-When all three print versions, it's ready. (`ec2-user` is the Amazon Linux login.)
-
----
-
-## Step 5 — Deploy the application code (REQUIRED)
-
-This is the step that actually puts your app on the server created in Step 2:
-bundle the code, upload it, write the `.env`, and start the containers. Skipping
-this leaves an empty VM. Run it again whenever your app code changes.
-
-From the **repo root** **(Git Bash)**:
+The instance installs Docker on first boot (~1-2 min). From the **repo root** in
+**Git Bash**, with `<PUBLIC_IP>` filled in:
 
 ```bash
 KEY=~/.ssh/ragproject-cdk-key.pem
 HOST=ec2-user@<PUBLIC_IP>
 SSHO="-o StrictHostKeyChecking=no -i $KEY"
 
-# 1. bundle committed files only (no .venv/.git):
-git archive --format=tar.gz -o /tmp/app.tar.gz HEAD
+# wait until Docker is ready:
+until ssh $SSHO $HOST "docker buildx version" 2>/dev/null; do echo waiting; sleep 10; done
 
-# 2. upload:
-scp $SSHO /tmp/app.tar.gz $HOST:/home/ec2-user/
-
-# Pick your own debug key, or let it generate a random one:
+# choose your debug key (pin a fixed one so it's predictable; else random):
 DKEY=${DEBUG_API_KEY:-$(openssl rand -hex 16)}
-echo "DEBUG_API_KEY = $DKEY"     # <-- copy this; it guards the /debug/* endpoints
+echo "DEBUG_API_KEY = $DKEY"          # <-- copy this; guards /debug/*
 
-# 3. unpack, write .env (Bedrock on), start the stack:
+# bundle committed code, upload, write .env, build + start:
+git archive --format=tar.gz -o /tmp/app.tar.gz HEAD
+scp $SSHO /tmp/app.tar.gz $HOST:/home/ec2-user/
 ssh $SSHO $HOST "rm -rf ragproject && mkdir ragproject && tar xzf app.tar.gz -C ragproject && \
   printf 'RAG_PROVIDER=bedrock\nAWS_REGION=us-east-1\nDEBUG_API_KEY=%s\n' '$DKEY' > ragproject/.env && \
   cd ragproject && docker compose up -d --build"
 ```
 
-To use a **fixed** key (so it's the same every deploy), set it first:
-`export DEBUG_API_KEY=my-fixed-key-123`. Otherwise a random one is generated
-and printed by the `echo` above.
+> Pin a fixed key with `export DEBUG_API_KEY=my-key` before running, so it's the
+> same every deploy.
 
-### Retrieving the debug key from a running deployment
-
-The server's `.env` is the source of truth. Retrieve it anytime in three steps:
-
-```powershell
-# 1. find the running instance's public IP
-aws ec2 describe-instances --filters "Name=instance-state-name,Values=running" `
-  --query "Reservations[].Instances[].PublicIpAddress" --output text
-```
-
-```bash
-# 2. ensure you have the SSH key (re-fetch from SSM if you deleted it; see Step 3)
-# 3. SSH in and read the key (substitute the IP):
-ssh -o StrictHostKeyChecking=no -i ~/.ssh/ragproject-cdk-key.pem \
-  ec2-user@<PUBLIC_IP> "grep DEBUG_API_KEY ragproject/.env"
-```
-
-Prints `DEBUG_API_KEY=...`. If SSH times out, you're locked out — see
-"Fix: SSH locked out" under Step 2. If there is **no** `.env`, the app wasn't
-deployed yet (you ran only `cdk deploy`, not Step 5).
-
----
-
-## Step 6 — Test
+### Test (any deployment)
 
 ```bash
 IP=<PUBLIC_IP>
@@ -190,57 +249,17 @@ curl -X POST http://$IP:8000/ingest -H "Content-Type: application/json" \
 curl -X POST http://$IP:8000/query  -H "Content-Type: application/json" \
   -d '{"question":"What is the capital of France?"}'
 ```
-
 Or open `http://<PUBLIC_IP>:8000/docs` in a browser.
 
 ---
 
-## Updating later
+## Reference
 
-- **Infra change** (edit `infra/ragproject_infra/ragproject_stack.py`):
-  `cdk deploy -c my_ip=$myip` — applies only the diff.
-- **App change**: re-run **Step 5** (re-bundle + scp + `docker compose up -d --build`).
-  No CDK needed.
+**Endpoints:** `/health`, `/ingest`, `/query`, `/ingest/file`, `/docs`,
+`/debug/chunks` + `/debug-ui` (need `X-Debug-Key`).
 
----
+**Cost:** the `t3.small` bills ~$0.50/day while running. `cdk destroy` stops it.
 
-## Step 7 — Tear it all down (stop billing)
-
-```powershell
-cd infra
-.\.venv\Scripts\Activate.ps1
-cdk destroy        # deletes the instance, security group, IAM role, key pair
-```
-
-Optionally also:
-
-```powershell
-aws iam detach-user-policy --user-name <you> `
-  --policy-arn arn:aws:iam::aws:policy/AdministratorAccess
-Remove-Item $HOME\.ssh\ragproject-cdk-key.pem -Force
-```
-
-Leave the `CDKToolkit` bootstrap stack — it's free and reused next time.
-
----
-
-## Mental model
-
-```
-ONE-TIME:  install tools -> aws configure -> cdk bootstrap
-INFRA:     cdk deploy          (creates the server; repeatable, reviewable)
-GET IN:    fetch SSH key from SSM
-APP:       git archive -> scp -> docker compose up   (ships the code)
-TEST:      curl / browser
-TEARDOWN:  cdk destroy         (removes everything in one command)
-```
-
-The win over hand-typed CLI: Steps 2 and 7 each replace ~15 manual commands and
-are fully reproducible — anyone with the repo gets an identical environment.
-
-## Notes
-
-- **Cost:** the `t3.small` bills ~$0.50/day while running. `cdk destroy` stops it.
-- **Security:** `/query` and `/ingest` are public over plain HTTP (fine for a
-  demo). `/debug/*` requires the `X-Debug-Key` header. For production, add HTTPS
-  and auth on the public routes, and scope the IAM permissions down.
+**Security:** `/query` and `/ingest` are public over plain HTTP (fine for a demo).
+`/debug/*` requires the key. For production: add HTTPS + auth on public routes and
+scope IAM down.
