@@ -4,12 +4,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from ragproject.api.app import app
-from ragproject.api.deps import get_chat_service
+from ragproject.api.deps import get_chat_service, get_session_documents
 from ragproject.core.chat import (
     AlwaysRetrieveRouter,
     ChatService,
     InMemoryConversationStore,
     NoOpQueryRewriter,
+    SessionDocuments,
     ThresholdFilter,
 )
 from ragproject.core.embeddings import FakeEmbedder
@@ -23,6 +24,8 @@ def client() -> Iterator[TestClient]:
     # A fresh, fully in-memory chat service per test via dependency override.
     retriever = Retriever(FakeEmbedder(dim=16), InMemoryVectorStore())
     retriever.index(["the sky is blue"], metadatas=[{"source": "facts.txt"}])
+    # Shared between the chat service and the upload route -- same instance.
+    session_documents = SessionDocuments(FakeEmbedder(dim=16))
     service = ChatService(
         retriever=retriever,
         router=AlwaysRetrieveRouter(),
@@ -30,8 +33,10 @@ def client() -> Iterator[TestClient]:
         llm=FakeLLM(response="Grounded answer [1]."),
         store=InMemoryConversationStore(),
         relevance_filter=ThresholdFilter(),
+        session_documents=session_documents,
     )
     app.dependency_overrides[get_chat_service] = lambda: service
+    app.dependency_overrides[get_session_documents] = lambda: session_documents
     yield TestClient(app)
     app.dependency_overrides.clear()
 
@@ -117,3 +122,62 @@ def test_stream_message_persists_turn(client: TestClient) -> None:
 def test_stream_message_unknown_conversation_is_404(client: TestClient) -> None:
     response = client.post("/conversations/nope/messages/stream", json={"question": "hi"})
     assert response.status_code == 404
+
+
+def test_list_conversations_returns_created(client: TestClient) -> None:
+    client.post("/conversations", json={"title": "first"})
+    client.post("/conversations", json={"title": "second"})
+    response = client.get("/conversations")
+    assert response.status_code == 200
+    titles = {c["title"] for c in response.json()["conversations"]}
+    assert titles == {"first", "second"}
+
+
+def test_upload_document_and_list(client: TestClient) -> None:
+    conversation_id = _new_conversation(client)
+    response = client.post(
+        f"/conversations/{conversation_id}/documents",
+        files={"file": ("notes.txt", b"the moon is bright tonight", "text/plain")},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["filename"] == "notes.txt"
+    assert body["chunks"] >= 1
+    listed = client.get(f"/conversations/{conversation_id}/documents").json()
+    assert listed["documents"] == ["notes.txt"]
+
+
+def test_session_document_surfaces_in_chat(client: TestClient) -> None:
+    conversation_id = _new_conversation(client)
+    client.post(
+        f"/conversations/{conversation_id}/documents",
+        files={"file": ("notes.txt", b"the moon is bright tonight", "text/plain")},
+    )
+    response = client.post(
+        f"/conversations/{conversation_id}/messages",
+        json={"question": "the moon is bright tonight"},
+    )
+    assert response.status_code == 200
+    documents = {source["document"] for source in response.json()["sources"]}
+    assert "notes.txt" in documents  # the session upload was retrieved alongside the shared index
+
+
+def test_upload_to_unknown_conversation_is_404(client: TestClient) -> None:
+    response = client.post(
+        "/conversations/nope/documents",
+        files={"file": ("notes.txt", b"text", "text/plain")},
+    )
+    assert response.status_code == 404
+
+
+def test_upload_unsupported_type_is_415(client: TestClient) -> None:
+    conversation_id = _new_conversation(client)
+    response = client.post(
+        f"/conversations/{conversation_id}/documents",
+        files={"file": ("data.csv", b"a,b,c", "text/csv")},
+    )
+    assert response.status_code == 415
+
+
+def test_list_documents_unknown_conversation_is_404(client: TestClient) -> None:
+    assert client.get("/conversations/nope/documents").status_code == 404

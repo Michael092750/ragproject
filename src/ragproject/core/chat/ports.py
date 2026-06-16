@@ -74,3 +74,21 @@ class ConversationStore(Protocol):
     def history(self, conversation_id: str, limit: int | None = None) -> list[Turn]: ...
 
     def append(self, conversation_id: str, turn: Turn) -> None: ...
+
+    def list_all(self) -> list[Conversation]: ...
+
+
+@runtime_checkable
+class SessionDocumentStore(Protocol):
+    """Ephemeral per-conversation document index (in memory, lost on restart).
+
+    Lets a chat search the files uploaded into *that session* only, separate
+    from the persistent shared knowledge base. Same embedder as the shared
+    store, so the two result sets can be merged by score.
+    """
+
+    def add(self, conversation_id: str, filename: str, text: str) -> list[str]: ...
+
+    def retrieve(self, conversation_id: str, query: str, k: int = 5) -> list[Hit]: ...
+
+    def documents(self, conversation_id: str) -> list[str]: ...

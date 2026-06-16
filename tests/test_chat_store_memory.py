@@ -32,3 +32,14 @@ def test_history_limit_returns_most_recent_oldest_first() -> None:
 
 def test_history_of_unknown_conversation_is_empty() -> None:
     assert InMemoryConversationStore().history("nope") == []
+
+
+def test_list_all_returns_all_conversations() -> None:
+    store = InMemoryConversationStore()
+    a = store.create("a")
+    b = store.create("b")
+    assert {c.id for c in store.list_all()} == {a.id, b.id}
+
+
+def test_list_all_empty_store_is_empty() -> None:
+    assert InMemoryConversationStore().list_all() == []

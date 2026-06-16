@@ -12,6 +12,7 @@ Public surface:
 from ragproject.core.chat.adapters.filtering import ThresholdFilter
 from ragproject.core.chat.adapters.rewriting import LlmQueryRewriter, NoOpQueryRewriter
 from ragproject.core.chat.adapters.routing import AlwaysRetrieveRouter, LlmRouter
+from ragproject.core.chat.adapters.session_documents import SessionDocuments
 from ragproject.core.chat.adapters.store_memory import InMemoryConversationStore
 from ragproject.core.chat.models import (
     ChatPolicy,
@@ -31,6 +32,7 @@ from ragproject.core.chat.ports import (
     RelevanceFilter,
     RetrievalPort,
     RetrievalRouter,
+    SessionDocumentStore,
 )
 from ragproject.core.chat.service import ChatService, ConversationNotFound
 
@@ -51,6 +53,8 @@ __all__ = [
     "RetrievalPort",
     "RetrievalRouter",
     "RouteDecision",
+    "SessionDocumentStore",
+    "SessionDocuments",
     "ThresholdFilter",
     "StreamEnd",
     "StreamEvent",

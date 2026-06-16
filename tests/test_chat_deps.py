@@ -1,7 +1,12 @@
 import pytest
 
-from ragproject.api.deps import get_chat_service
+from ragproject.api.deps import get_chat_service, get_session_documents
 from ragproject.core.chat import ChatService
+
+
+def _clear_caches() -> None:
+    get_chat_service.cache_clear()
+    get_session_documents.cache_clear()
 
 
 def test_get_chat_service_uses_in_memory_without_database_url(
@@ -9,9 +14,9 @@ def test_get_chat_service_uses_in_memory_without_database_url(
 ) -> None:
     monkeypatch.setenv("RAG_PROVIDER", "fake")
     monkeypatch.delenv("DATABASE_URL", raising=False)
-    get_chat_service.cache_clear()
+    _clear_caches()
     assert isinstance(get_chat_service(), ChatService)
-    get_chat_service.cache_clear()
+    _clear_caches()
 
 
 def test_get_chat_service_uses_postgres_when_database_url_set(
@@ -31,8 +36,8 @@ def test_get_chat_service_uses_postgres_when_database_url_set(
     monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@host/db")
     monkeypatch.setattr("ragproject.api.deps.PgVectorStore", FakePgVector)
     monkeypatch.setattr("ragproject.api.deps.PgConversationStore", FakePgConversation)
-    get_chat_service.cache_clear()
+    _clear_caches()
     assert isinstance(get_chat_service(), ChatService)
     assert recorded["vector_dsn"] == "postgresql://u:p@host/db"
     assert recorded["conversation_dsn"] == "postgresql://u:p@host/db"
-    get_chat_service.cache_clear()
+    _clear_caches()

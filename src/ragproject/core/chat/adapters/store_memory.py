@@ -37,3 +37,6 @@ class InMemoryConversationStore:
 
     def append(self, conversation_id: str, turn: Turn) -> None:
         self._turns.setdefault(conversation_id, []).append(turn)
+
+    def list_all(self) -> list[Conversation]:
+        return sorted(self._conversations.values(), key=lambda c: c.created_at, reverse=True)

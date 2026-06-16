@@ -75,3 +75,9 @@ def test_history_is_isolated_per_conversation(store: PgConversationStore) -> Non
     second = store.create("b")
     store.append(first.id, Turn("qa", "aa"))
     assert store.history(second.id) == []
+
+
+def test_list_all_returns_created_conversations(store: PgConversationStore) -> None:
+    a = store.create("a")
+    b = store.create("b")
+    assert {c.id for c in store.list_all()} == {a.id, b.id}

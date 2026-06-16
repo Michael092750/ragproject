@@ -33,6 +33,7 @@ from ragproject.core.chat.ports import (
     RelevanceFilter,
     RetrievalPort,
     RetrievalRouter,
+    SessionDocumentStore,
 )
 from ragproject.core.chat.prompting import build_chat_prompt
 from ragproject.core.chat.timing import StepTimer
@@ -48,6 +49,20 @@ class ConversationNotFound(Exception):
 _DEFAULT_POLICY = ChatPolicy()
 
 
+def merge_hits(primary: list[Hit], secondary: list[Hit], k: int) -> list[Hit]:
+    """Combine two hit lists into the top ``k`` by score, de-duplicated by id.
+
+    Both lists come from the same embedder (shared store + session docs), so
+    their scores are comparable.
+    """
+    best: dict[str, Hit] = {}
+    for hit in (*primary, *secondary):
+        current = best.get(hit.id)
+        if current is None or hit.score > current.score:
+            best[hit.id] = hit
+    return sorted(best.values(), key=lambda hit: hit.score, reverse=True)[:k]
+
+
 class ChatService:
     """Coordinate routing, rewriting, retrieval, generation, and persistence."""
 
@@ -60,6 +75,7 @@ class ChatService:
         store: ConversationStore,
         relevance_filter: RelevanceFilter,
         *,
+        session_documents: SessionDocumentStore | None = None,
         policy: ChatPolicy = _DEFAULT_POLICY,
         clock: Callable[[], float] = time.perf_counter,
     ) -> None:
@@ -69,6 +85,7 @@ class ChatService:
         self._llm = llm
         self._store = store
         self._relevance_filter = relevance_filter
+        self._session_documents = session_documents
         self._policy = policy
         self._clock = clock
 
@@ -83,6 +100,10 @@ class ChatService:
     def get_history(self, conversation_id: str) -> list[Turn]:
         """Return the full turn history of a conversation (for display)."""
         return self._store.history(conversation_id)
+
+    def list_conversations(self) -> list[Conversation]:
+        """Return all conversations, newest first (for the sidebar)."""
+        return self._store.list_all()
 
     def reply(self, conversation_id: str, question: str) -> ChatResult:
         """Answer ``question``, returning the complete result (drains the stream)."""
@@ -128,7 +149,15 @@ class ChatService:
                 with timer.measure("rewrite"):
                     standalone = self._rewriter.condense(history, question)
                 with timer.measure("retrieve"):
-                    retrieved = self._retriever.retrieve(standalone, k=self._policy.k)
+                    shared = self._retriever.retrieve(standalone, k=self._policy.k)
+                    session = (
+                        self._session_documents.retrieve(
+                            conversation_id, standalone, self._policy.k
+                        )
+                        if self._session_documents is not None
+                        else []
+                    )
+                    retrieved = merge_hits(shared, session, self._policy.k)
                 # Coverage backstop: drop hits not relevant enough to ground on.
                 hits = self._relevance_filter.keep(retrieved)
 

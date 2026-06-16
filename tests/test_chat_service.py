@@ -25,8 +25,9 @@ from ragproject.core.chat.ports import (
     RelevanceFilter,
     RetrievalPort,
     RetrievalRouter,
+    SessionDocumentStore,
 )
-from ragproject.core.chat.service import ChatService, ConversationNotFound
+from ragproject.core.chat.service import ChatService, ConversationNotFound, merge_hits
 from ragproject.core.embeddings import FakeEmbedder
 from ragproject.core.generation import FakeLLM, StreamingLLM
 from ragproject.core.retrieval import Retriever
@@ -69,6 +70,22 @@ class StubRouter:
         return RouteDecision(should_retrieve=self._should)
 
 
+class StubSessionDocuments:
+    """A SessionDocumentStore double returning fixed per-session hits."""
+
+    def __init__(self, hits: list[Hit] | None = None) -> None:
+        self._hits = hits or []
+
+    def add(self, conversation_id: str, filename: str, text: str) -> list[str]:
+        return []
+
+    def retrieve(self, conversation_id: str, query: str, k: int = 5) -> list[Hit]:
+        return self._hits
+
+    def documents(self, conversation_id: str) -> list[str]:
+        return []
+
+
 def _service(
     retriever: RetrievalPort | None = None,
     router: RetrievalRouter | None = None,
@@ -76,6 +93,7 @@ def _service(
     llm: StreamingLLM | None = None,
     store: ConversationStore | None = None,
     relevance_filter: RelevanceFilter | None = None,
+    session_documents: SessionDocumentStore | None = None,
 ) -> ChatService:
     return ChatService(
         retriever=retriever or RecordingRetriever(),
@@ -84,6 +102,7 @@ def _service(
         llm=llm or FakeLLM(response="ANSWER"),
         store=store or InMemoryConversationStore(),
         relevance_filter=relevance_filter or ThresholdFilter(),
+        session_documents=session_documents,
     )
 
 
@@ -240,6 +259,36 @@ def test_reply_stream_to_unknown_conversation_raises() -> None:
     service = _service()
     with pytest.raises(ConversationNotFound):
         list(service.reply_stream("does-not-exist", "hi"))
+
+
+def test_list_conversations_returns_all_started() -> None:
+    store = InMemoryConversationStore()
+    service = _service(store=store)
+    a = service.start("a")
+    b = service.start("b")
+    assert {c.id for c in service.list_conversations()} == {a.id, b.id}
+
+
+def test_merge_hits_takes_top_k_by_score() -> None:
+    primary = [Hit("a", 0.9, {}), Hit("b", 0.3, {})]
+    secondary = [Hit("c", 0.7, {}), Hit("d", 0.1, {})]
+    assert [hit.id for hit in merge_hits(primary, secondary, k=3)] == ["a", "c", "b"]
+
+
+def test_merge_hits_dedups_by_id_keeping_higher_score() -> None:
+    merged = merge_hits([Hit("x", 0.4, {})], [Hit("x", 0.8, {})], k=5)
+    assert len(merged) == 1
+    assert merged[0].score == 0.8
+
+
+def test_reply_merges_session_and_shared_hits() -> None:
+    shared = RecordingRetriever(hits=[Hit("g", 0.5, {"text": "global"})])
+    session = StubSessionDocuments(hits=[Hit("s", 0.9, {"text": "session"})])
+    service = _service(retriever=shared, session_documents=session)
+    convo = service.start("c")
+    events = list(service.reply_stream(convo.id, "q"))
+    start = next(event for event in events if isinstance(event, StreamStart))
+    assert [hit.id for hit in start.hits] == ["s", "g"]  # session 0.9 ranks above global 0.5
 
 
 def test_history_limit_caps_turns_sent_to_the_rewriter() -> None:

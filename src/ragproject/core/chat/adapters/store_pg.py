@@ -103,3 +103,11 @@ class PgConversationStore:
                 (conversation_id, turn.question, turn.answer),
             )
             conn.commit()
+
+    def list_all(self) -> list[Conversation]:
+        with psycopg.connect(self._dsn) as conn:
+            rows = conn.execute(
+                f"SELECT id, title, created_at FROM {self._conversations_table} "
+                f"ORDER BY created_at DESC"
+            ).fetchall()
+        return [Conversation(id=row[0], title=row[1], created_at=row[2]) for row in rows]

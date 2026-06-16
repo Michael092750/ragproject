@@ -26,6 +26,7 @@ from ragproject.core.chat import (
     RetrievalRouter,
     ThresholdFilter,
 )
+from ragproject.core.chat.adapters.session_documents import SessionDocuments
 from ragproject.core.chat.adapters.store_pg import PgConversationStore
 from ragproject.core.embeddings import Embedder, FakeEmbedder
 from ragproject.core.generation import FakeLLM, GenerativeLLM
@@ -78,6 +79,17 @@ def get_pipeline() -> RagPipeline:
 
 
 @lru_cache(maxsize=1)
+def get_session_documents() -> SessionDocuments:
+    """Return the process-wide session-document index (built once, then cached).
+
+    Shared between the chat service (which retrieves from it) and the upload route
+    (which adds to it) -- they must be the same in-memory instance.
+    """
+    embedder, _ = _build_ai_providers(get_settings())
+    return SessionDocuments(embedder)
+
+
+@lru_cache(maxsize=1)
 def get_chat_service() -> ChatService:
     """Return the process-wide chat service (built once, then cached)."""
     settings = get_settings()
@@ -95,6 +107,7 @@ def get_chat_service() -> ChatService:
         llm=llm,
         store=_build_conversation_store(settings),
         relevance_filter=ThresholdFilter(settings.chat_relevance_threshold),
+        session_documents=get_session_documents(),
         policy=ChatPolicy(
             k=settings.chat_retrieval_k,
             history_limit=settings.chat_history_turns,
