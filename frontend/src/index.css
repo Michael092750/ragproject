@@ -1,13 +1,102 @@
-:root {
-  font-family: system-ui, -apple-system, sans-serif;
-  color: #1f2430;
-  background: #f5f6f8;
+@import "tailwindcss";
+
+/* IndustryIQ design tokens: a deep near-black canvas with a violet/indigo accent
+   for a serious, technical feel. Tailwind v4 turns each --color-* into utilities
+   (bg-ink, text-fog, border-edge, bg-accent, ...). */
+@theme {
+  --color-ink: #07070d;        /* app background (near black) */
+  --color-panel: #10101b;      /* sidebar / panels */
+  --color-panel-2: #181826;    /* raised surfaces, hover */
+  --color-panel-3: #20202f;    /* inputs, chips */
+  --color-edge: #282838;       /* hairline borders */
+  --color-edge-2: #34344a;     /* stronger borders */
+  --color-fog: #9a9fb4;        /* muted text */
+  --color-fog-2: #6b7088;      /* dimmer text */
+  --color-accent: #7c5cff;     /* violet/indigo */
+  --color-accent-2: #9b7bff;   /* lighter accent */
+  --color-accent-strong: #6840f5;
+  --color-accent-ink: #0a0716; /* text on accent */
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
 }
 
 * {
   box-sizing: border-box;
 }
 
+html, body, #root {
+  height: 100%;
+}
+
 body {
   margin: 0;
+  background: var(--color-ink);
+  color: #eef0f6;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
 }
+
+/* The IndustryIQ accent gradient (used by the logo glyph and assistant avatar).
+   A plain class so it doesn't depend on Tailwind's gradient-utility naming. */
+.iq-grad {
+  background-image: linear-gradient(135deg, var(--color-accent), var(--color-accent-strong));
+}
+
+/* A restrained, on-theme scrollbar so panels don't get default chrome. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-edge-2) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-edge-2);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--color-fog-2);
+  background-clip: content-box;
+}
+
+/* Markdown rendered inside an assistant message. */
+.prose-iq {
+  line-height: 1.65;
+  word-break: break-word;
+}
+.prose-iq p { margin: 0 0 0.75rem; }
+.prose-iq p:last-child { margin-bottom: 0; }
+.prose-iq ul, .prose-iq ol { margin: 0 0 0.75rem; padding-left: 1.25rem; }
+.prose-iq li { margin: 0.2rem 0; }
+.prose-iq ul { list-style: disc; }
+.prose-iq ol { list-style: decimal; }
+.prose-iq h1, .prose-iq h2, .prose-iq h3 { font-weight: 600; margin: 1rem 0 0.5rem; }
+.prose-iq h1 { font-size: 1.25rem; }
+.prose-iq h2 { font-size: 1.12rem; }
+.prose-iq h3 { font-size: 1rem; }
+.prose-iq code {
+  background: var(--color-panel-3);
+  border: 1px solid var(--color-edge);
+  padding: 0.08rem 0.34rem;
+  border-radius: 0.34rem;
+  font-size: 0.86em;
+}
+.prose-iq pre {
+  background: #0b0b14;
+  border: 1px solid var(--color-edge);
+  border-radius: 0.6rem;
+  padding: 0.85rem 1rem;
+  overflow-x: auto;
+  margin: 0 0 0.75rem;
+}
+.prose-iq pre code { background: none; border: none; padding: 0; }
+.prose-iq a { color: var(--color-accent-2); text-decoration: underline; }
+.prose-iq strong { color: #fff; font-weight: 600; }
