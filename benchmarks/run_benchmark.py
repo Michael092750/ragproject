@@ -1,10 +1,11 @@
 """Benchmark the ragproject retriever against a labeled gold set.
 
 This is a pure *retrieval* benchmark: a set of queries, each with a known set of
-relevant ("gold") chunks, run against the live Postgres + pgvector store. It
-measures **whether the gold chunks were retrieved** (recall / hit / MRR) and
-**how fast** (embed vs. search latency, throughput). No LLM is involved -- runs
-are cheap, deterministic, and directly comparable across index methods.
+relevant ("gold") chunks, run against a live vector store -- ``--backend pgvector``
+(Postgres) or ``--backend milvus``. It measures **whether the gold chunks were
+retrieved** (recall / hit / MRR) and **how fast** (embed vs. search latency,
+throughput). No LLM is involved -- runs are cheap, deterministic, and directly
+comparable across engines and index methods.
 
 What it does
 ------------
@@ -16,12 +17,14 @@ What it does
    ranked hit list against the gold set. Search is read-only, so the benchmark
    never writes to your database.
 
-Comparing index methods
------------------------
+Comparing engines / index methods
+---------------------------------
 Tag each run with ``--label`` (recorded in the JSON ``config``) and ``--out`` to
-a file, then diff. To compare, say, a sequential scan against an HNSW index,
-create the index on the ``chunks`` table between runs -- the query set and gold
-set are unchanged, so differences in recall / ``search_ms`` are purely the index.
+a file, then diff. To compare pgvector against Milvus, populate both with the
+same corpus (scripts/migrate_pg_to_milvus.py) and run once per ``--backend`` --
+the query set and gold set are unchanged, so differences in recall / ``search_ms``
+are purely the engine. To compare index methods within one engine, rebuild its
+index between runs (e.g. a pgvector seqscan vs. HNSW).
 
 Provider
 --------
@@ -35,7 +38,8 @@ Override per run with ``--provider``.
 Usage
 -----
     python benchmarks/run_benchmark.py
-    python benchmarks/run_benchmark.py --k 10 --label pg-seqscan --out pg.json
+    python benchmarks/run_benchmark.py --backend pgvector --label pg-hnsw --out pg.json
+    python benchmarks/run_benchmark.py --backend milvus --label milvus-autoindex --out milvus.json
 """
 
 import argparse
@@ -101,18 +105,39 @@ class Corpus:
     n_chunks: int
 
 
-def build_corpus(embedder: Embedder, settings: Settings) -> Corpus:
-    """Benchmark against the *live* Postgres + pgvector store -- the real path.
+def build_store(settings: Settings, backend: str, dim: int) -> VectorStore:
+    """The live store to benchmark, selected by ``backend``.
 
-    Self-contained against the database: the gold labels (chunk text + category)
-    are read straight from the table's own metadata via ``all_items()``, so no
-    separate corpus file is needed. Search is read-only (``SELECT ... ORDER BY
-    embedding <=> ...``), so the benchmark never writes to your database, and
-    ``search_ms`` measures real pgvector distance + the SQL round trip.
+    ``pgvector`` and ``milvus`` are both real, persistent engines holding the same
+    corpus (see scripts/migrate_pg_to_milvus.py); pointing the *same* queries and
+    gold set at each is how the two are compared. The Milvus import is deferred so
+    pgvector-only runs don't need pymilvus.
     """
+    if backend == "milvus":
+        from ragproject.core.milvusvectorstore import MilvusVectorStore
+
+        return MilvusVectorStore(
+            settings.milvus_uri,
+            dim=dim,
+            collection=settings.milvus_collection,
+            token=settings.milvus_token,
+            index_type=settings.milvus_index_type,
+        )
     if not settings.database_url:
         raise SystemExit("DATABASE_URL is not set (the live Postgres store to benchmark).")
-    store = PgVectorStore(settings.database_url, dim=embedder.dim)
+    return PgVectorStore(settings.database_url, dim=dim)
+
+
+def build_corpus(embedder: Embedder, settings: Settings, backend: str) -> Corpus:
+    """Benchmark against the *live* vector store (pgvector or Milvus) -- the real path.
+
+    Self-contained against the store: the gold labels (chunk text + category) are
+    read straight from the store's own metadata via ``all_items()``, so no
+    separate corpus file is needed. Search is read-only, so the benchmark never
+    writes to your store, and ``search_ms`` measures the real distance computation
+    plus the network round trip.
+    """
+    store = build_store(settings, backend, embedder.dim)
     text_by_id: dict[str, str] = {}
     category_by_id: dict[str, str] = {}
     for cid, meta in store.all_items(limit=1_000_000):
@@ -276,6 +301,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--queries", type=Path, default=DEFAULT_QUERIES)
     parser.add_argument(
+        "--backend",
+        choices=["pgvector", "milvus"],
+        default="pgvector",
+        help="Which live vector store to benchmark (default: pgvector).",
+    )
+    parser.add_argument(
         "--provider",
         choices=["anthropic", "bedrock"],
         default=None,
@@ -303,17 +334,20 @@ def main(argv: list[str]) -> int:
     if args.limit is not None:
         queries = queries[: args.limit]
 
-    print(f"provider={settings.provider}  k={k}  queries={len(queries)}")
+    print(f"provider={settings.provider}  backend={args.backend}  k={k}  queries={len(queries)}")
 
     embedder = build_embedder(settings)
-    corpus = build_corpus(embedder, settings)
-    print(f"loaded {corpus.n_chunks} chunks from the live pg store")
+    corpus = build_corpus(embedder, settings, args.backend)
+    print(f"loaded {corpus.n_chunks} chunks from the live {args.backend} store")
 
     # Full experiment setup, recorded with the results so each run is self-documenting
     # and reproducible (and diffs across index methods are unambiguous).
     config: dict[str, Any] = {
         "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
         "label": args.label,
+        "backend": args.backend,
+        # The Milvus index that produced these numbers (None for pgvector).
+        "milvus_index_type": settings.milvus_index_type if args.backend == "milvus" else None,
         "provider": settings.provider,
         "embedder": type(embedder).__name__,
         "embed_dim": embedder.dim,

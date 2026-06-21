@@ -31,6 +31,17 @@ class Settings:
     # vector store (data does not survive restarts).
     database_url: str | None = None
 
+    # Which vector store to use: "pgvector" (Postgres, the default) or "milvus".
+    # pgvector is kept for benchmarking; "milvus" routes the live app to Milvus.
+    vector_backend: str = "pgvector"
+    # Milvus standalone connection (used when vector_backend == "milvus").
+    milvus_uri: str = "http://localhost:19530"
+    milvus_token: str | None = None
+    milvus_collection: str = "chunks"
+    # Vector index method built on the Milvus collection (HNSW, IVF_FLAT, FLAT,
+    # ...). Explicit (not AUTOINDEX) so benchmark runs name the index they used.
+    milvus_index_type: str = "HNSW"
+
     # AI provider: "fake" (offline default), "anthropic" (local: Anthropic API
     # key + a local CPU embedder), or "bedrock" (real Amazon Bedrock on AWS).
     provider: str = "fake"
@@ -66,6 +77,11 @@ def get_settings() -> Settings:
         debug_api_key=os.getenv("DEBUG_API_KEY"),
         admin_api_key=os.getenv("ADMIN_API_KEY"),
         database_url=os.getenv("DATABASE_URL"),
+        vector_backend=os.getenv("VECTOR_BACKEND", "pgvector"),
+        milvus_uri=os.getenv("MILVUS_URI", "http://localhost:19530"),
+        milvus_token=os.getenv("MILVUS_TOKEN"),
+        milvus_collection=os.getenv("MILVUS_COLLECTION", "chunks"),
+        milvus_index_type=os.getenv("MILVUS_INDEX_TYPE", "HNSW"),
         provider=os.getenv("RAG_PROVIDER", "fake"),
         aws_region=os.getenv("AWS_REGION", "us-east-1"),
         bedrock_llm_model_id=os.getenv("BEDROCK_LLM_MODEL_ID", "us.anthropic.claude-sonnet-4-6"),
