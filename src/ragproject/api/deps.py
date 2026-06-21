@@ -13,8 +13,15 @@ Tests override ``get_pipeline`` / ``get_chat_service`` via FastAPI's
 """
 
 from functools import lru_cache
+from typing import Annotated
+
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from ragproject.config import Settings, get_settings
+from ragproject.core.auth import AuthService, User, UserStore
+from ragproject.core.auth.adapters.store_memory import InMemoryUserStore
+from ragproject.core.auth.adapters.store_pg import PgUserStore
 from ragproject.core.chat import (
     AlwaysRetrieveRouter,
     ChatPolicy,
@@ -98,6 +105,45 @@ def _build_conversation_store(settings: Settings) -> ConversationStore:
     if settings.database_url:
         return PgConversationStore(settings.database_url)
     return InMemoryConversationStore()
+
+
+def _build_user_store(settings: Settings) -> UserStore:
+    """Choose the user store: persistent Postgres, or in-memory (default)."""
+    if settings.database_url:
+        return PgUserStore(settings.database_url)
+    return InMemoryUserStore()
+
+
+@lru_cache(maxsize=1)
+def get_auth_service() -> AuthService:
+    """Return the process-wide auth service (built once, then cached)."""
+    settings = get_settings()
+    return AuthService(
+        _build_user_store(settings),
+        secret=settings.jwt_secret,
+        algorithm=settings.jwt_algorithm,
+        expiry_minutes=settings.jwt_expiry_minutes,
+    )
+
+
+# Reads "Authorization: Bearer <token>"; auto_error=False so a missing header
+# reaches our handler as None (a 401 we control) instead of FastAPI's 403.
+_bearer = HTTPBearer(auto_error=False)
+
+
+def get_current_user(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+    auth: Annotated[AuthService, Depends(get_auth_service)],
+) -> User:
+    """Resolve the bearer token to a user, or reject the request with 401."""
+    user = auth.identify(credentials.credentials) if credentials is not None else None
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return user
 
 
 @lru_cache(maxsize=1)

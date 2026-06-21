@@ -6,6 +6,7 @@ the service cannot tell it apart from the Postgres-backed store.
 """
 
 import uuid
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from ragproject.core.chat.models import Conversation, Turn
@@ -19,11 +20,12 @@ class InMemoryConversationStore(ConversationStore):
         self._conversations: dict[str, Conversation] = {}
         self._turns: dict[str, list[Turn]] = {}
 
-    def create(self, title: str) -> Conversation:
+    def create(self, title: str, owner_id: str | None = None) -> Conversation:
         conversation = Conversation(
             id=uuid.uuid4().hex[:16],
             title=title,
             created_at=datetime.now(UTC),
+            owner_id=owner_id,
         )
         self._conversations[conversation.id] = conversation
         self._turns[conversation.id] = []
@@ -39,5 +41,17 @@ class InMemoryConversationStore(ConversationStore):
     def append(self, conversation_id: str, turn: Turn) -> None:
         self._turns.setdefault(conversation_id, []).append(turn)
 
-    def list_all(self) -> list[Conversation]:
-        return sorted(self._conversations.values(), key=lambda c: c.created_at, reverse=True)
+    def rename(self, conversation_id: str, title: str) -> None:
+        existing = self._conversations.get(conversation_id)
+        if existing is not None:
+            self._conversations[conversation_id] = replace(existing, title=title)
+
+    def delete(self, conversation_id: str) -> None:
+        self._conversations.pop(conversation_id, None)
+        self._turns.pop(conversation_id, None)
+
+    def list_all(self, owner_id: str | None = None) -> list[Conversation]:
+        conversations = list(self._conversations.values())
+        if owner_id is not None:
+            conversations = [c for c in conversations if c.owner_id == owner_id]
+        return sorted(conversations, key=lambda c: c.created_at, reverse=True)

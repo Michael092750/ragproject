@@ -14,11 +14,17 @@ from ragproject.core.vectorstore import Hit
 
 @dataclass(frozen=True)
 class Conversation:
-    """A single chat thread: an id, a human label, and when it began."""
+    """A single chat thread: an id, a human label, when it began, and its owner.
+
+    ``owner_id`` is the id of the user who created it; ``None`` means unowned
+    (the pre-auth default, still used by stores called without a user). Routes
+    pass the authenticated user so a thread is only ever served to its owner.
+    """
 
     id: str
     title: str
     created_at: datetime
+    owner_id: str | None = None
 
 
 @dataclass(frozen=True)

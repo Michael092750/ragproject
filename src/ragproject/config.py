@@ -56,6 +56,15 @@ class Settings:
     # Browser origins allowed to call the API (CORS). The Vite dev server default.
     cors_origins: tuple[str, ...] = ("http://localhost:5173",)
 
+    # Authentication: secret used to sign JWT access tokens (HS256). A stable
+    # default keeps local dev (and the offline test suite) working out of the
+    # box, but it is PUBLIC -- anyone with it can forge a token for any account.
+    # OVERRIDE IT in every real deployment by setting JWT_SECRET to a long random
+    # value. Tokens expire after ``jwt_expiry_minutes`` (default 24h).
+    jwt_secret: str = "dev-insecure-secret-change-me-in-production"  # noqa: S105 (documented)
+    jwt_algorithm: str = "HS256"
+    jwt_expiry_minutes: int = 60 * 24
+
     # Multi-round chat: how many recent turns to feed into the prompt, and how
     # many chunks to retrieve per turn.
     chat_history_turns: int = 6
@@ -89,6 +98,9 @@ def get_settings() -> Settings:
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY"),
         anthropic_llm_model_id=os.getenv("ANTHROPIC_LLM_MODEL_ID", "claude-sonnet-4-6"),
         cors_origins=cors_origins,
+        jwt_secret=os.getenv("JWT_SECRET", "dev-insecure-secret-change-me-in-production"),
+        jwt_algorithm=os.getenv("JWT_ALGORITHM", "HS256"),
+        jwt_expiry_minutes=int(os.getenv("JWT_EXPIRY_MINUTES", str(60 * 24))),
         chat_history_turns=int(os.getenv("CHAT_HISTORY_TURNS", "6")),
         chat_retrieval_k=int(os.getenv("CHAT_RETRIEVAL_K", "5")),
         chat_router=os.getenv("CHAT_ROUTER", "always"),

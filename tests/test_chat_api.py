@@ -1,10 +1,12 @@
 from collections.abc import Iterator
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
 
 from ragproject.api.app import app
-from ragproject.api.deps import get_chat_service, get_session_documents
+from ragproject.api.deps import get_chat_service, get_current_user, get_session_documents
+from ragproject.core.auth import User
 from ragproject.core.chat import (
     AlwaysRetrieveRouter,
     ChatService,
@@ -17,6 +19,11 @@ from ragproject.core.embeddings import FakeEmbedder
 from ragproject.core.generation import FakeLLM
 from ragproject.core.retrieval import Retriever
 from ragproject.core.vectorstore import InMemoryVectorStore
+
+# A stand-in authenticated user; tests that need a second user override the
+# get_current_user dependency mid-test (see test_conversation_is_scoped_to_owner).
+USER_A = User(id="user-a", email="a@example.com", password_hash="x", created_at=datetime.now(UTC))
+USER_B = User(id="user-b", email="b@example.com", password_hash="x", created_at=datetime.now(UTC))
 
 
 @pytest.fixture
@@ -37,6 +44,9 @@ def client() -> Iterator[TestClient]:
     )
     app.dependency_overrides[get_chat_service] = lambda: service
     app.dependency_overrides[get_session_documents] = lambda: session_documents
+    # Auth is exercised in test_auth_api; here we treat every request as USER_A
+    # so the chat tests stay focused on chat behavior.
+    app.dependency_overrides[get_current_user] = lambda: USER_A
     yield TestClient(app)
     app.dependency_overrides.clear()
 
@@ -181,3 +191,48 @@ def test_upload_unsupported_type_is_415(client: TestClient) -> None:
 
 def test_list_documents_unknown_conversation_is_404(client: TestClient) -> None:
     assert client.get("/conversations/nope/documents").status_code == 404
+
+
+def test_rename_conversation(client: TestClient) -> None:
+    conversation_id = _new_conversation(client)
+    response = client.patch(f"/conversations/{conversation_id}", json={"title": "Renamed"})
+    assert response.status_code == 200
+    assert response.json()["title"] == "Renamed"
+    titles = {c["title"] for c in client.get("/conversations").json()["conversations"]}
+    assert "Renamed" in titles
+
+
+def test_delete_conversation(client: TestClient) -> None:
+    conversation_id = _new_conversation(client)
+    assert client.delete(f"/conversations/{conversation_id}").status_code == 204
+    # Gone: both the thread and its history are unreachable afterwards.
+    assert client.get(f"/conversations/{conversation_id}/messages").status_code == 404
+    assert client.get("/conversations").json()["conversations"] == []
+
+
+def test_delete_unknown_conversation_is_404(client: TestClient) -> None:
+    assert client.delete("/conversations/nope").status_code == 404
+
+
+def test_conversation_is_scoped_to_owner(client: TestClient) -> None:
+    conversation_id = _new_conversation(client)  # created as USER_A
+    # A different user must not see, read, rename, or delete USER_A's thread.
+    app.dependency_overrides[get_current_user] = lambda: USER_B
+    assert client.get("/conversations").json()["conversations"] == []
+    assert client.get(f"/conversations/{conversation_id}/messages").status_code == 404
+    assert (
+        client.post(
+            f"/conversations/{conversation_id}/messages", json={"question": "hi"}
+        ).status_code
+        == 404
+    )
+    assert client.patch(f"/conversations/{conversation_id}", json={"title": "x"}).status_code == 404
+    assert client.delete(f"/conversations/{conversation_id}").status_code == 404
+
+
+def test_conversations_listed_only_for_their_owner(client: TestClient) -> None:
+    client.post("/conversations", json={"title": "a-thread"})  # USER_A
+    app.dependency_overrides[get_current_user] = lambda: USER_B
+    client.post("/conversations", json={"title": "b-thread"})  # USER_B
+    titles = {c["title"] for c in client.get("/conversations").json()["conversations"]}
+    assert titles == {"b-thread"}

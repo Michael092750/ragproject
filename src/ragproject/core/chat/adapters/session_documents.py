@@ -47,3 +47,7 @@ class SessionDocuments(SessionDocumentStore):
             if source and source not in seen:
                 seen.append(source)
         return seen
+
+    def clear(self, conversation_id: str) -> None:
+        """Drop a conversation's uploaded documents (called when it is deleted)."""
+        self._sessions.pop(conversation_id, None)

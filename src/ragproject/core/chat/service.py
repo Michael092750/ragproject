@@ -89,9 +89,9 @@ class ChatService:
         self._policy = policy
         self._clock = clock
 
-    def start(self, title: str) -> Conversation:
-        """Open a new conversation."""
-        return self._store.create(title)
+    def start(self, title: str, owner_id: str | None = None) -> Conversation:
+        """Open a new conversation, owned by ``owner_id`` when given."""
+        return self._store.create(title, owner_id)
 
     def get_conversation(self, conversation_id: str) -> Conversation | None:
         """Return the conversation, or ``None`` if it does not exist."""
@@ -101,9 +101,19 @@ class ChatService:
         """Return the full turn history of a conversation (for display)."""
         return self._store.history(conversation_id)
 
-    def list_conversations(self) -> list[Conversation]:
-        """Return all conversations, newest first (for the sidebar)."""
-        return self._store.list_all()
+    def list_conversations(self, owner_id: str | None = None) -> list[Conversation]:
+        """Return conversations (optionally only ``owner_id``'s), newest first."""
+        return self._store.list_all(owner_id)
+
+    def rename_conversation(self, conversation_id: str, title: str) -> None:
+        """Change a conversation's title."""
+        self._store.rename(conversation_id, title)
+
+    def delete_conversation(self, conversation_id: str) -> None:
+        """Delete a conversation, its turns, and any documents uploaded into it."""
+        self._store.delete(conversation_id)
+        if self._session_documents is not None:
+            self._session_documents.clear(conversation_id)
 
     def reply(self, conversation_id: str, question: str) -> ChatResult:
         """Answer ``question``, returning the complete result (drains the stream)."""
