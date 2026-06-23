@@ -4,6 +4,11 @@
 library of consultancy and association reports, with cited sources. Built as a
 modular, testable Retrieval-Augmented Generation (RAG) system.
 
+> **Quick nav:** [run locally](#run-the-api-locally) · [web UI](#web-ui-industryiq) ·
+> [test end-to-end](#end-to-end-test-full-stack-api--ui) ·
+> [stop local services](#stop-and-reset-local-services).
+> Deploying to AWS? See **[DEPLOY.md](DEPLOY.md)**.
+
 ## Development
 
 ```powershell
@@ -228,3 +233,23 @@ Invoke-WebRequest "$base/conversations/$cid" -Method Delete -Headers $auth -UseB
 > Prerequisite for the live run: `pip install -e ".[dev,local]"` and `RAG_PROVIDER=anthropic`
 > with `ANTHROPIC_API_KEY` set (real answers via Claude + a local embedder), or
 > `RAG_PROVIDER=fake` for a no-key plumbing check.
+
+## Stop and reset local services
+
+Local Postgres (and the optional Milvus stack) run under Docker Compose; the API
+itself runs in the foreground, so **Ctrl+C** stops it.
+
+```powershell
+docker compose down       # stop + remove containers (named data volumes survive)
+docker compose down -v    # also delete volumes -> wipes the DB (users, chats, ingested docs)
+docker compose ps         # see what's still running
+```
+
+- Use `down` between sessions to free resources while **keeping** your ingested
+  knowledge base and accounts.
+- Use `down -v` for a clean slate — e.g. when switching embedding providers, since a
+  384-dim local embedder and 1024-dim Bedrock Titan can't share one pgvector table.
+
+> This section is **local only**. Deploying to / stopping / tearing down the **AWS**
+> environment is covered entirely in **[DEPLOY.md](DEPLOY.md)** (see its
+> [Tear down](DEPLOY.md#7-tear-down) section).
