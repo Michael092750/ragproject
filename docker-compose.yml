@@ -9,7 +9,7 @@ services:
     environment:
       POSTGRES_USER: rag
       POSTGRES_PASSWORD: ragpass
-      POSTGRES_DB: ragproject
+      POSTGRES_DB: industryiq
     ports:
       # host:container -> reach the DB from your app at localhost:5432
       - "5432:5432"
@@ -17,7 +17,7 @@ services:
       # Named volume keeps the data on disk so it survives `docker compose down`.
       - pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U rag -d ragproject"]
+      test: ["CMD-SHELL", "pg_isready -U rag -d industryiq"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -88,7 +88,7 @@ services:
     container_name: industryiq_app
     environment:
       # Inside the compose network, the DB host is the service name "db" (not localhost).
-      DATABASE_URL: postgresql://rag:ragpass@db:5432/ragproject
+      DATABASE_URL: postgresql://rag:ragpass@db:5432/industryiq
       # Which vector store the app uses: "pgvector" (default) or "milvus".
       VECTOR_BACKEND: ${VECTOR_BACKEND:-pgvector}
       # Inside the compose network, Milvus is reachable at the service name "milvus".

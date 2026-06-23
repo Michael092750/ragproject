@@ -115,7 +115,7 @@ reports/
 docker compose up -d db
 
 # 2) point .env at it, with the same provider the API uses:
-#   DATABASE_URL=postgresql://rag:ragpass@localhost:5432/ragproject
+#   DATABASE_URL=postgresql://rag:ragpass@localhost:5432/industryiq
 #   RAG_PROVIDER=anthropic
 #   ANTHROPIC_API_KEY=sk-ant-...
 

@@ -104,7 +104,7 @@ diff and applies only what changed. Run `cdk diff -c my_ip=$myip` first to previ
 
 > First set these in a **Git Bash** shell (used by several tasks):
 > ```bash
-> KEY=~/.ssh/ragproject-cdk-key.pem
+> KEY=~/.ssh/industryiq-cdk-key.pem
 > HOST=ec2-user@<PUBLIC_IP>
 > SSHO="-o StrictHostKeyChecking=no -i $KEY"
 > ```
@@ -118,16 +118,16 @@ aws ec2 describe-instances --filters "Name=instance-state-name,Values=running" `
 **Re-fetch the SSH key** (if you deleted the `.pem`) — get the param name from the
 stack outputs, then (PowerShell):
 ```powershell
-$cmd = aws cloudformation describe-stacks --stack-name RagprojectStack `
+$cmd = aws cloudformation describe-stacks --stack-name IndustryIqStack `
   --query "Stacks[0].Outputs[?OutputKey=='GetSshKeyCommand'].OutputValue" --output text
-$keyPath = "$HOME\.ssh\ragproject-cdk-key.pem"
+$keyPath = "$HOME\.ssh\industryiq-cdk-key.pem"
 Invoke-Expression $cmd | Out-File -FilePath $keyPath -Encoding ascii
 icacls $keyPath /inheritance:r /grant:r "$($env:USERNAME):(R)"
 ```
 
 **Retrieve the debug key** (the `X-Debug-Key` for `/debug/*`) — Git Bash:
 ```bash
-ssh $SSHO $HOST "grep DEBUG_API_KEY ragproject/.env"
+ssh $SSHO $HOST "grep DEBUG_API_KEY industryiq/.env"
 ```
 No output / no file? The app isn't deployed — run Procedure B.
 
@@ -180,7 +180,7 @@ cdk destroy          # deletes the instance, security group, IAM role, key pair
 Optional extra cleanup (only if fully done with AWS):
 ```powershell
 aws iam detach-user-policy --user-name <you> --policy-arn arn:aws:iam::aws:policy/AdministratorAccess
-Remove-Item $HOME\.ssh\ragproject-cdk-key.pem -Force
+Remove-Item $HOME\.ssh\industryiq-cdk-key.pem -Force
 ```
 Leave the `CDKToolkit` bootstrap stack — it's free and reused next time.
 
@@ -204,7 +204,7 @@ cdk deploy -c my_ip=$myip --require-approval never
 
 Then fetch the SSH key (run the printed `GetSshKeyCommand`, saving it):
 ```powershell
-$keyPath = "$HOME\.ssh\ragproject-cdk-key.pem"
+$keyPath = "$HOME\.ssh\industryiq-cdk-key.pem"
 aws ssm get-parameter --name /ec2/keypair/<KEY_PAIR_ID> --with-decryption `
   --query Parameter.Value --output text | Out-File -FilePath $keyPath -Encoding ascii
 icacls $keyPath /inheritance:r /grant:r "$($env:USERNAME):(R)"
@@ -217,7 +217,7 @@ The instance installs Docker on first boot (~1-2 min). From the **repo root** in
 **Git Bash**, with `<PUBLIC_IP>` filled in:
 
 ```bash
-KEY=~/.ssh/ragproject-cdk-key.pem
+KEY=~/.ssh/industryiq-cdk-key.pem
 HOST=ec2-user@<PUBLIC_IP>
 SSHO="-o StrictHostKeyChecking=no -i $KEY"
 
@@ -231,9 +231,9 @@ echo "DEBUG_API_KEY = $DKEY"          # <-- copy this; guards /debug/*
 # bundle committed code, upload, write .env, build + start:
 git archive --format=tar.gz -o /tmp/app.tar.gz HEAD
 scp $SSHO /tmp/app.tar.gz $HOST:/home/ec2-user/
-ssh $SSHO $HOST "rm -rf ragproject && mkdir ragproject && tar xzf app.tar.gz -C ragproject && \
-  printf 'AWS_REGION=us-east-1\nDEBUG_API_KEY=%s\n' '$DKEY' > ragproject/.env && \
-  cd ragproject && docker compose -f docker-compose.yml -f compose.prod.yml up -d --build"
+ssh $SSHO $HOST "rm -rf industryiq && mkdir industryiq && tar xzf app.tar.gz -C industryiq && \
+  printf 'AWS_REGION=us-east-1\nDEBUG_API_KEY=%s\n' '$DKEY' > industryiq/.env && \
+  cd industryiq && docker compose -f docker-compose.yml -f compose.prod.yml up -d --build"
 ```
 
 > The `-f docker-compose.yml -f compose.prod.yml` overlay sets `RAG_PROVIDER=bedrock`

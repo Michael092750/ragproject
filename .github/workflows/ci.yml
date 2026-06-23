@@ -28,16 +28,16 @@ jobs:
         env:
           POSTGRES_USER: rag
           POSTGRES_PASSWORD: ragpass
-          POSTGRES_DB: ragproject
+          POSTGRES_DB: industryiq
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U rag -d ragproject"
+          --health-cmd "pg_isready -U rag -d industryiq"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
     env:
-      DATABASE_URL: postgresql://rag:ragpass@localhost:5432/ragproject
+      DATABASE_URL: postgresql://rag:ragpass@localhost:5432/industryiq
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

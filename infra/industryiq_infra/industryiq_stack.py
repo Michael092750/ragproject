@@ -36,7 +36,7 @@ class IndustryIqStack(Stack):
         )
 
         # CDK creates the SSH key pair; private key lands in SSM Parameter Store.
-        key_pair = ec2.KeyPair(self, "KeyPair", key_pair_name="ragproject-cdk-key")
+        key_pair = ec2.KeyPair(self, "KeyPair", key_pair_name="industryiq-cdk-key")
 
         # Boot script: install Docker + the compose and buildx plugins.
         user_data = ec2.UserData.for_linux()
