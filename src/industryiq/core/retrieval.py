@@ -49,9 +49,14 @@ class Retriever:
         return ids
 
     def retrieve(self, query: str, k: int = 5) -> list[Hit]:
-        """Return up to ``k`` chunks most relevant to ``query``."""
+        """Return up to ``k`` chunks most relevant to ``query``.
+
+        The raw ``query`` is passed through as ``query_text`` so stores that
+        support it (Milvus) can run a hybrid dense + BM25 search; dense-only
+        stores ignore it.
+        """
         query_vector = self._embedder.embed([query])[0]
-        return self._store.search(query_vector, k=k)
+        return self._store.search(query_vector, k=k, query_text=query)
 
     def all_chunks(self, limit: int = 100) -> list[tuple[str, dict[str, Any]]]:
         """Return up to ``limit`` indexed ``(id, metadata)`` pairs, for inspection."""

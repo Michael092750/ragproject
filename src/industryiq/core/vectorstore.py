@@ -33,8 +33,12 @@ class VectorStore(Protocol):
         """Insert or replace vectors keyed by ``ids``, with parallel metadata."""
         ...
 
-    def search(self, query: list[float], k: int = 5) -> list[Hit]:
-        """Return up to ``k`` hits, highest cosine similarity first."""
+    def search(self, query: list[float], k: int = 5, *, query_text: str | None = None) -> list[Hit]:
+        """Return up to ``k`` hits, highest cosine similarity first.
+
+        ``query_text`` is the raw query string, for stores that can also run a
+        lexical/full-text (e.g. BM25) pass; dense-only stores ignore it.
+        """
         ...
 
     def all_items(self, limit: int = 100) -> list[tuple[str, dict[str, Any]]]:
@@ -71,7 +75,8 @@ class InMemoryVectorStore(VectorStore):
             self._vectors[id_] = vector
             self._metadatas[id_] = metadata
 
-    def search(self, query: list[float], k: int = 5) -> list[Hit]:
+    def search(self, query: list[float], k: int = 5, *, query_text: str | None = None) -> list[Hit]:
+        # Dense-only store: query_text is accepted for protocol parity but unused.
         if k <= 0:
             raise ValueError("k must be positive")
         hits = [

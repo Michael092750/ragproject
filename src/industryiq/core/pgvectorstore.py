@@ -61,7 +61,9 @@ class PgVectorStore(VectorStore):
                 )
             conn.commit()
 
-    def search(self, query: list[float], k: int = 5) -> list[Hit]:
+    def search(self, query: list[float], k: int = 5, *, query_text: str | None = None) -> list[Hit]:
+        # Dense-only store: query_text is accepted for protocol parity but unused
+        # (a lexical pass here would use Postgres full-text, e.g. tsvector).
         if k <= 0:
             raise ValueError("k must be positive")
         with self._connect() as conn:

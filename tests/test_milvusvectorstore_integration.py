@@ -73,6 +73,78 @@ def test_metadata_is_carried_through(store: VectorStore) -> None:
     assert store.search([0.0, 1.0], k=1)[0].metadata == {"text": "B"}
 
 
+def test_promoted_fields_round_trip(store: VectorStore) -> None:
+    # The promoted columns (text/source/section/category) plus a residual key
+    # (page) must come back as one dict, byte-identical to what went in.
+    meta = {
+        "text": "T",
+        "source": "report.pdf",
+        "section": "Introduction",
+        "category": "AI",
+        "page": 3,
+    }
+    store.upsert(["x"], [[1.0, 0.0]], [dict(meta)])
+    assert store.search([1.0, 0.0], k=1)[0].metadata == meta
+
+
+def test_hybrid_search_uses_query_text_and_reports_cosine(store: VectorStore) -> None:
+    store.upsert(
+        ids=["a", "b", "c"],
+        vectors=[[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
+        metadatas=[{"text": "alpha apple"}, {"text": "beta banana"}, {"text": "gamma cherry"}],
+    )
+    hits = store.search([0.0, 1.0], k=3, query_text="banana")
+    assert hits, "hybrid search returned no hits"
+    # Dense (nearest [0,1]) and BM25 ("banana") both favor b.
+    assert hits[0].id == "b"
+    # Score is the dense cosine similarity, not the RRF fused score.
+    assert hits[0].score == pytest.approx(1.0)
+    assert all(-1.0 <= hit.score <= 1.0 for hit in hits)
+
+
+def test_semantic_search_is_dense_cosine(store: VectorStore) -> None:
+    from industryiq.core.milvusvectorstore import MilvusVectorStore
+
+    assert isinstance(store, MilvusVectorStore)
+    _seed(store)
+    hits = store.semantic_search([0.0, 1.0], k=3)
+    assert [hit.id for hit in hits] == ["b", "c", "a"]
+    assert hits[0].score == pytest.approx(1.0)
+
+
+def test_lexical_search_matches_terms_without_embedding(store: VectorStore) -> None:
+    from industryiq.core.milvusvectorstore import MilvusVectorStore
+
+    assert isinstance(store, MilvusVectorStore)
+    store.upsert(
+        ids=["a", "b", "c"],
+        vectors=[[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
+        metadatas=[{"text": "alpha apple"}, {"text": "beta banana"}, {"text": "gamma cherry"}],
+    )
+    hits = store.lexical_search("banana", k=3)
+    assert hits, "lexical search returned no hits"
+    assert hits[0].id == "b"  # only chunk containing "banana"
+    assert hits[0].score > 0.0  # raw BM25 score, not a cosine
+
+
+def test_weighted_search_blends_and_returns_results(store: VectorStore) -> None:
+    from industryiq.core.milvusvectorstore import MilvusVectorStore
+
+    assert isinstance(store, MilvusVectorStore)
+    store.upsert(
+        ids=["a", "b", "c"],
+        vectors=[[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
+        metadatas=[{"text": "alpha apple"}, {"text": "beta banana"}, {"text": "gamma cherry"}],
+    )
+    # beta>0 so BM25 ("banana") contributes; dense ([0,1]) also favors b.
+    hits = store.weighted_search([0.0, 1.0], "banana", k=3, alpha=0.5, beta=0.5)
+    assert hits, "weighted search returned no hits"
+    assert hits[0].id == "b"
+    # Score is the blended/normalized fusion score, not raw cosine; ranking is
+    # non-increasing because the reported score IS what we ranked by.
+    assert [h.score for h in hits] == sorted((h.score for h in hits), reverse=True)
+
+
 def test_upsert_replaces_existing_id(store: VectorStore) -> None:
     store.upsert(["a"], [[1.0, 0.0]], [{"v": 1}])
     store.upsert(["a"], [[0.0, 1.0]], [{"v": 2}])
