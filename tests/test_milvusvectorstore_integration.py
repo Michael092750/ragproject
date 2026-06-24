@@ -74,13 +74,16 @@ def test_metadata_is_carried_through(store: VectorStore) -> None:
 
 
 def test_promoted_fields_round_trip(store: VectorStore) -> None:
-    # The promoted columns (text/source/section/category) plus a residual key
-    # (page) must come back as one dict, byte-identical to what went in.
+    # The promoted columns plus a residual key (page) must come back as one dict,
+    # byte-identical to what went in.
     meta = {
         "text": "T",
         "source": "report.pdf",
         "section": "Introduction",
         "category": "AI",
+        "publisher": "McKinsey",
+        "source_type": "consultancy",
+        "published_date": "2024-03-15",
         "page": 3,
     }
     store.upsert(["x"], [[1.0, 0.0]], [dict(meta)])

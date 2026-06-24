@@ -12,8 +12,9 @@ benchmarked against the same query/gold set:
 * The primary key is a ``VARCHAR`` holding the caller's string ids (UUIDs), not a
   Milvus auto-id -- ``upsert`` is therefore a true replace-by-id.
 * The frequently-searched metadata keys are promoted to their own typed columns
-  (``text``, ``source``, ``section``, ``category``) so they can be filtered
-  server-side; everything else rides along in a residual ``metadata`` JSON field
+  (``text``, ``source``, ``section``, ``category``, ``publisher``,
+  ``source_type``, ``published_date``) so they can be filtered server-side;
+  everything else rides along in a residual ``metadata`` JSON field
   (mirroring pgvector's ``JSONB`` column). On read the columns are folded back
   into a single ``metadata`` dict, so the contract is still "dict in, same dict
   out" -- identical to pgvector -- and arbitrary keys (e.g. ``category``)
@@ -64,11 +65,31 @@ _TEXT_FIELD = "text"
 _SOURCE_FIELD = "source"
 _SECTION_FIELD = "section"
 _CATEGORY_FIELD = "category"
+_PUBLISHER_FIELD = "publisher"
+_SOURCE_TYPE_FIELD = "source_type"
+# ISO-8601 date string ("2024-03-15"); ISO sorts lexicographically = chronologically,
+# so ``published_date >= "2024"`` works as a range filter on the VARCHAR column.
+_PUBLISHED_DATE_FIELD = "published_date"
 _METADATA_FIELD = "metadata"
-_SCALAR_STR_FIELDS = (_TEXT_FIELD, _SOURCE_FIELD, _SECTION_FIELD, _CATEGORY_FIELD)
+_SCALAR_STR_FIELDS = (
+    _TEXT_FIELD,
+    _SOURCE_FIELD,
+    _SECTION_FIELD,
+    _CATEGORY_FIELD,
+    _PUBLISHER_FIELD,
+    _SOURCE_TYPE_FIELD,
+    _PUBLISHED_DATE_FIELD,
+)
 # Promoted columns worth a scalar index because they are filtered/faceted on at
 # query time (``text`` is excluded -- it is full-text indexed via BM25 instead).
-_INDEXED_FIELDS = (_SOURCE_FIELD, _SECTION_FIELD, _CATEGORY_FIELD)
+_INDEXED_FIELDS = (
+    _SOURCE_FIELD,
+    _SECTION_FIELD,
+    _CATEGORY_FIELD,
+    _PUBLISHER_FIELD,
+    _SOURCE_TYPE_FIELD,
+    _PUBLISHED_DATE_FIELD,
+)
 # Fields read back to reconstruct a hit's metadata dict.
 _OUTPUT_FIELDS = (*_SCALAR_STR_FIELDS, _METADATA_FIELD)
 
@@ -93,12 +114,18 @@ _MAX_TEXT = 65535
 _MAX_SOURCE = 2048
 _MAX_SECTION = 1024
 _MAX_CATEGORY = 256
+_MAX_PUBLISHER = 512
+_MAX_SOURCE_TYPE = 128
+_MAX_PUBLISHED_DATE = 32
 # Per-field VARCHAR length for the scalar string columns, by field name.
 _SCALAR_STR_MAX = {
     _TEXT_FIELD: _MAX_TEXT,
     _SOURCE_FIELD: _MAX_SOURCE,
     _SECTION_FIELD: _MAX_SECTION,
     _CATEGORY_FIELD: _MAX_CATEGORY,
+    _PUBLISHER_FIELD: _MAX_PUBLISHER,
+    _SOURCE_TYPE_FIELD: _MAX_SOURCE_TYPE,
+    _PUBLISHED_DATE_FIELD: _MAX_PUBLISHED_DATE,
 }
 
 # Default *build-time* params per index type (override via ``index_params``). The

@@ -66,6 +66,41 @@ def test_ingest_file_with_metadata_records_category(tmp_path: Path) -> None:
     assert hit.metadata["source"] == str(file)
 
 
+def test_ingest_pages_tags_page_title_and_metadata() -> None:
+    pipeline = _pipeline(chunk_size=3, overlap=0)
+    ids = pipeline.ingest_pages(
+        ["alpha beta gamma", "delta epsilon zeta"],
+        source="report.pdf",
+        metadata={"category": "AI"},
+        title="My Report",
+    )
+    assert len(ids) == 2
+    by_text = {meta["text"]: meta for _id, meta in pipeline.list_chunks()}
+    assert by_text["alpha beta gamma"]["page"] == 1
+    assert by_text["delta epsilon zeta"]["page"] == 2
+    assert by_text["alpha beta gamma"]["title"] == "My Report"
+    assert by_text["alpha beta gamma"]["category"] == "AI"
+    assert by_text["alpha beta gamma"]["source"] == "report.pdf"
+
+
+def test_ingest_pages_single_page_omits_page() -> None:
+    pipeline = _pipeline()
+    pipeline.ingest_pages(["just one page of text"], source="note.txt", title="Note")
+    meta = pipeline.list_chunks()[0][1]
+    assert "page" not in meta
+    assert meta["title"] == "Note"
+
+
+def test_ingest_file_sets_title_from_filename_stem(tmp_path: Path) -> None:
+    file = tmp_path / "quarterly.txt"
+    file.write_text("alpha beta gamma")
+    pipeline = _pipeline()
+    pipeline.ingest_file(file)
+    meta = pipeline.list_chunks()[0][1]
+    assert meta["title"] == "quarterly"  # no embedded title -> filename stem
+    assert "page" not in meta  # txt is single-page
+
+
 def test_list_chunks_returns_ingested_content() -> None:
     pipeline = _pipeline(chunk_size=3, overlap=0)
     pipeline.ingest_text("alpha beta gamma delta", source="doc.txt")

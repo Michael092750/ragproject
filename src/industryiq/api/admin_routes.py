@@ -18,7 +18,7 @@ from pydantic import BaseModel
 
 from industryiq.api.deps import get_pipeline
 from industryiq.api.security import require_admin_key
-from industryiq.core.loaders import SUPPORTED_EXTENSIONS, load
+from industryiq.core.loaders import SUPPORTED_EXTENSIONS
 from industryiq.core.pipeline import RagPipeline
 
 Pipeline = Annotated[RagPipeline, Depends(get_pipeline)]
@@ -44,10 +44,10 @@ def ingest_file(file: UploadFile, pipeline: Pipeline) -> IngestResponse:
         tmp.write(file.file.read())
         tmp_path = tmp.name
     try:
-        text = load(tmp_path)
+        # source is the original upload name (the temp path is meaningless to the user).
+        chunk_ids = pipeline.ingest_file(tmp_path, source=file.filename)
     finally:
         os.unlink(tmp_path)
-    chunk_ids = pipeline.ingest_text(text, source=file.filename)
     return IngestResponse(chunk_ids=chunk_ids)
 
 

@@ -27,8 +27,8 @@ def load_text(path: str | Path) -> str:
     return p.read_text(encoding="utf-8")
 
 
-def load_pdf(path: str | Path) -> str:
-    """Extract text from a ``.pdf`` file, joining pages with newlines.
+def load_pdf_pages(path: str | Path) -> list[str]:
+    """Extract a ``.pdf`` file's text page by page (one string per page).
 
     Raises:
         FileNotFoundError: If ``path`` does not point to an existing file.
@@ -40,7 +40,12 @@ def load_pdf(path: str | Path) -> str:
     if p.suffix.lower() != ".pdf":
         raise ValueError(f"load_pdf expects a .pdf file, got {p.suffix!r}")
     reader = pypdf.PdfReader(str(p))
-    return "\n".join(page.extract_text() for page in reader.pages)
+    return [page.extract_text() for page in reader.pages]
+
+
+def load_pdf(path: str | Path) -> str:
+    """Extract text from a ``.pdf`` file, joining pages with newlines."""
+    return "\n".join(load_pdf_pages(path))
 
 
 def load_docx(path: str | Path) -> str:
@@ -96,3 +101,38 @@ def load(path: str | Path) -> str:
             f"Unsupported file type {p.suffix!r}; supported: {sorted(SUPPORTED_EXTENSIONS)}"
         )
     return _to_utf8_safe(loader(path))
+
+
+def load_pages(path: str | Path) -> list[str]:
+    """Load a file as a list of page texts (each UTF-8 safe), for page attribution.
+
+    PDFs return one element per page; other formats have no real pagination, so
+    they return the whole document as a single element.
+    """
+    p = Path(path)
+    if p.suffix.lower() == ".pdf":
+        return [_to_utf8_safe(page) for page in load_pdf_pages(p)]
+    return [load(p)]
+
+
+def load_title(path: str | Path) -> str | None:
+    """The document's embedded title, or ``None`` if it has none.
+
+    Reads PDF/DOCX document metadata; other formats have no title. Callers
+    typically fall back to the file name. Never raises -- a missing or unreadable
+    title is just ``None``.
+    """
+    p = Path(path)
+    ext = p.suffix.lower()
+    try:
+        if ext == ".pdf":
+            info = pypdf.PdfReader(str(p)).metadata
+            title = info.title if info else None
+        elif ext == ".docx":
+            title = docx.Document(str(p)).core_properties.title
+        else:
+            return None
+    except Exception:  # noqa: BLE001 -- best-effort metadata read; absence is fine
+        return None
+    title = (title or "").strip()
+    return title or None

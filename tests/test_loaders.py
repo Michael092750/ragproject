@@ -82,6 +82,30 @@ def test_load_dispatches_docx() -> None:
     assert "Hello from a Word document." in load(FIXTURES / "sample.docx")
 
 
+# --- load_pages / load_title ----------------------------------------------
+
+
+def test_load_pages_pdf_returns_one_string_per_page() -> None:
+    pages = loaders.load_pages(FIXTURES / "sample.pdf")
+    assert len(pages) >= 2
+    assert any("Hello from a PDF document." in page for page in pages)
+    assert any("second page" in page for page in pages)
+
+
+def test_load_pages_txt_is_single_element() -> None:
+    pages = loaders.load_pages(FIXTURES / "sample.txt")
+    assert len(pages) == 1
+    assert "Hello, RAG world." in pages[0]
+
+
+def test_load_title_for_txt_is_none() -> None:
+    assert loaders.load_title(FIXTURES / "sample.txt") is None
+
+
+def test_load_title_never_raises_on_missing() -> None:
+    assert loaders.load_title(FIXTURES / "missing.pdf") is None
+
+
 def test_load_unsupported_extension_raises(tmp_path: Path) -> None:
     bad = tmp_path / "data.csv"
     bad.write_text("a,b,c")

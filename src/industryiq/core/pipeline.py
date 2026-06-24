@@ -16,7 +16,7 @@ from typing import Any
 
 from industryiq.core.chunking import chunk_text
 from industryiq.core.generation import LLM, generate_answer
-from industryiq.core.loaders import load
+from industryiq.core.loaders import load_pages, load_title
 from industryiq.core.retrieval import Retriever
 from industryiq.core.vectorstore import Hit
 
@@ -65,9 +65,55 @@ class RagPipeline:
         metadatas = [dict(base) for _ in chunks] if base else None
         return self._retriever.index(chunks, metadatas=metadatas)
 
-    def ingest_file(self, path: str | Path, metadata: dict[str, Any] | None = None) -> list[str]:
-        """Load a file, chunk it, and add it to the store. Returns the chunk ids."""
-        return self.ingest_text(load(path), source=str(path), metadata=metadata)
+    def ingest_pages(
+        self,
+        pages: list[str],
+        *,
+        source: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        title: str | None = None,
+    ) -> list[str]:
+        """Chunk pre-extracted ``pages`` and add them, tagging each chunk's ``page``.
+
+        ``page`` (1-based) is recorded only when there is more than one page, so
+        single-page / non-paginated sources don't carry a misleading number.
+        Chunking is per page, so a chunk never straddles a page boundary.
+        """
+        base: dict[str, Any] = {}
+        if source is not None:
+            base["source"] = source
+        if title:
+            base["title"] = title
+        if metadata:
+            base.update(metadata)
+        paginated = len(pages) > 1
+        chunks: list[str] = []
+        metadatas: list[dict[str, Any]] = []
+        for page_number, page_text in enumerate(pages, start=1):
+            for chunk in chunk_text(page_text, chunk_size=self._chunk_size, overlap=self._overlap):
+                chunks.append(chunk)
+                chunk_meta = dict(base)
+                if paginated:
+                    chunk_meta["page"] = page_number
+                metadatas.append(chunk_meta)
+        return self._retriever.index(chunks, metadatas=metadatas)
+
+    def ingest_file(
+        self,
+        path: str | Path,
+        metadata: dict[str, Any] | None = None,
+        source: str | None = None,
+    ) -> list[str]:
+        """Load a file (page-aware), chunk it, and add it to the store.
+
+        Each chunk carries its ``page`` (for paginated formats) and the document
+        ``title`` (embedded metadata, else the file name). ``source`` overrides
+        the recorded path -- e.g. an upload's original name when ``path`` is a
+        temp file. Returns the chunk ids.
+        """
+        source = source if source is not None else str(path)
+        title = load_title(path) or Path(source).stem
+        return self.ingest_pages(load_pages(path), source=source, metadata=metadata, title=title)
 
     def query(self, question: str, k: int = 5) -> QueryResult:
         """Retrieve relevant chunks and generate a grounded answer."""

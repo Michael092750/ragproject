@@ -36,7 +36,18 @@ def test_index_merges_caller_metadata_with_text() -> None:
     retriever = _retriever()
     retriever.index(["doc one"], metadatas=[{"source": "file.txt"}])
     hit = retriever.retrieve("doc one", k=1)[0]
-    assert hit.metadata == {"text": "doc one", "source": "file.txt"}
+    assert hit.metadata["text"] == "doc one"
+    assert hit.metadata["source"] == "file.txt"
+    # Derived metadata is added at index time.
+    assert hit.metadata["chunk_index"] == 0
+    assert "content_hash" in hit.metadata
+
+
+def test_index_assigns_sequential_chunk_index() -> None:
+    retriever = _retriever()
+    retriever.index(["first", "second", "third"])
+    indices = sorted(meta["chunk_index"] for _id, meta in retriever.all_chunks())
+    assert indices == [0, 1, 2]
 
 
 def test_index_returns_assigned_ids() -> None:

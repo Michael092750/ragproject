@@ -5,11 +5,17 @@ with a :class:`~industryiq.core.vectorstore.VectorStore`. It is provider-agnosti
 swap in a real embedder or store and the retrieval logic is unchanged.
 """
 
+import hashlib
 import uuid
 from typing import Any
 
 from industryiq.core.embeddings import Embedder
 from industryiq.core.vectorstore import Hit, VectorStore
+
+
+def _content_hash(text: str) -> str:
+    """A short, stable digest of a chunk's text, for de-duplication."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
 class Retriever:
@@ -27,9 +33,11 @@ class Retriever:
     ) -> list[str]:
         """Embed ``texts`` and add them to the store.
 
-        Each chunk's text is stored in its metadata under ``"text"`` (unless a
-        caller-supplied metadata already provides it) so retrieved hits carry the
-        content needed for generation.
+        Each chunk gets derived metadata: ``"text"`` (the content, for
+        generation), ``"chunk_index"`` (its position in this call's sequence --
+        callers pass one document's chunks in order, so it is the position within
+        that document, for context-window expansion), and ``"content_hash"`` (for
+        de-duplication). Caller-supplied keys override these.
 
         Returns:
             The ids assigned to the indexed texts (generated if not supplied).
@@ -38,12 +46,11 @@ class Retriever:
             return []
         if ids is None:
             ids = [str(uuid.uuid4()) for _ in texts]
-        if metadatas is None:
-            metadatas = [{"text": text} for text in texts]
-        else:
-            metadatas = [
-                {"text": text, **meta} for text, meta in zip(texts, metadatas, strict=True)
-            ]
+        supplied = metadatas if metadatas is not None else [{} for _ in texts]
+        metadatas = [
+            {"text": text, "chunk_index": index, "content_hash": _content_hash(text), **meta}
+            for index, (text, meta) in enumerate(zip(texts, supplied, strict=True))
+        ]
         vectors = self._embedder.embed(texts)
         self._store.upsert(ids, vectors, metadatas)
         return ids

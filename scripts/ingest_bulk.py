@@ -23,7 +23,7 @@ from collections import Counter
 from pathlib import Path
 
 from industryiq.api.deps import get_pipeline
-from industryiq.core.loaders import SUPPORTED_EXTENSIONS, load
+from industryiq.core.loaders import SUPPORTED_EXTENSIONS
 
 
 def main(root: Path) -> None:
@@ -37,7 +37,7 @@ def main(root: Path) -> None:
         # Top-level subfolder = category; files directly under root are uncategorized.
         category = rel.parts[0] if len(rel.parts) > 1 else "uncategorized"
         try:
-            ids = pipeline.ingest_text(load(path), source=str(rel), metadata={"category": category})
+            ids = pipeline.ingest_file(path, metadata={"category": category}, source=str(rel))
         except Exception as exc:
             # One unreadable file (encrypted, corrupt, ...) shouldn't abort the batch.
             failures.append((rel, f"{type(exc).__name__}: {exc}"))
