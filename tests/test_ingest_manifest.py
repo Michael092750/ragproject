@@ -62,6 +62,51 @@ def test_load_manifest_missing_file_returns_empty(tmp_path: Path) -> None:
     assert load_manifest(tmp_path / "nope.csv") == {}
 
 
+def test_load_manifest_accepts_source_domain_alias(tmp_path: Path) -> None:
+    # An older collector named the domain column "source_domain".
+    manifest = tmp_path / "manifest.csv"
+    manifest.write_text(
+        "status,url,filename,source_domain,detected_year\n"
+        "downloaded,https://www.mckinsey.com/x.pdf,report.pdf,www.mckinsey.com,2025\n",
+        encoding="utf-8",
+    )
+    assert load_manifest(manifest)["report.pdf"] == {
+        "publisher": "mckinsey.com",
+        "source_type": "consultancy",
+        "published_date": "2025",
+    }
+
+
+def test_load_manifest_accepts_year_score_alias_and_drops_zero(tmp_path: Path) -> None:
+    # An older collector named the year column "year_score"; "0" means unknown.
+    manifest = tmp_path / "manifest.csv"
+    manifest.write_text(
+        "status,url,filename,domain,year_score\n"
+        "downloaded,u,dated.pdf,some-trade-body.org,2026\n"
+        "downloaded,u,undated.pdf,some-trade-body.org,0\n",
+        encoding="utf-8",
+    )
+    parsed = load_manifest(manifest)
+    assert parsed["dated.pdf"]["published_date"] == "2026"
+    assert "published_date" not in parsed["undated.pdf"]
+
+
+def test_load_manifest_joins_by_basename_of_path(tmp_path: Path) -> None:
+    # An older collector stored a full (foreign) path in the filename column.
+    manifest = tmp_path / "manifest.csv"
+    manifest.write_text(
+        "status,url,filename,domain,detected_year\n"
+        r"downloaded,u,C:\foreign\machine\report.pdf,www.rabobankna.com,2024" + "\n",
+        encoding="utf-8",
+    )
+    parsed = load_manifest(manifest)
+    assert parsed["report.pdf"] == {
+        "publisher": "rabobankna.com",
+        "source_type": "company",
+        "published_date": "2024",
+    }
+
+
 def test_manifest_metadata_joins_by_filename_and_caches(tmp_path: Path) -> None:
     category = tmp_path / "AI"
     category.mkdir()

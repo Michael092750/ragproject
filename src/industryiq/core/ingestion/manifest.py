@@ -12,13 +12,23 @@ metadata the manifest can supply:
 
 Files with no manifest row (or no manifest at all) simply get none of these --
 absent provenance is left unset, never guessed.
+
+Older collector runs wrote the same fields under different names, so reads are
+tolerant of a few aliases: ``source_domain`` for ``domain``, ``year_score`` for
+``detected_year``, and a ``filename`` that is a full (possibly foreign) path
+rather than a bare name -- the join is always by base name.
 """
 
 import csv
+import re
 from pathlib import Path
 from typing import Any
 
 MANIFEST_NAME = "manifest.csv"
+
+# A four-digit 19xx/20xx year, used to keep only plausible years (and reject a
+# "0" / blank "unknown" sentinel some manifests use).
+_YEAR_RE = re.compile(r"(?:19|20)\d{2}")
 
 # Per-scan memo of parsed manifests, keyed by manifest path -> (filename -> meta).
 ManifestCache = dict[Path, dict[str, dict[str, Any]]]
@@ -81,10 +91,31 @@ def classify_source_type(domain: str) -> str:
     return ""
 
 
+def _row_year(row: dict[str, str]) -> str:
+    """A four-digit publication year from the row, or ``""``.
+
+    Reads ``detected_year`` (canonical) or ``year_score`` (an older collector's
+    name for the field) and keeps only a plausible 19xx/20xx year -- so an
+    "unknown" sentinel like ``"0"`` is treated as absent, not stamped as year 0.
+    """
+    raw = (row.get("detected_year") or row.get("year_score") or "").strip()
+    match = _YEAR_RE.search(raw)
+    return match.group(0) if match else ""
+
+
+def _basename(filename: str) -> str:
+    """Last path segment of ``filename``, tolerating either separator.
+
+    Some collector runs stored an absolute path (often from another machine)
+    instead of a bare name; the join to PDFs is by base name, so normalise here.
+    """
+    return filename.replace("\\", "/").rsplit("/", 1)[-1]
+
+
 def _row_metadata(row: dict[str, str]) -> dict[str, Any]:
     """Map one manifest row to the doc-level metadata keys it can supply."""
     meta: dict[str, Any] = {}
-    domain = (row.get("domain") or "").strip()
+    domain = (row.get("domain") or row.get("source_domain") or "").strip()
     if domain:
         publisher = domain.lower().removeprefix("www.")
         if publisher:
@@ -92,7 +123,7 @@ def _row_metadata(row: dict[str, str]) -> dict[str, Any]:
         source_type = classify_source_type(domain)
         if source_type:
             meta["source_type"] = source_type
-    year = (row.get("detected_year") or "").strip()
+    year = _row_year(row)
     if year:
         meta["published_date"] = year
     return meta
@@ -111,7 +142,7 @@ def load_manifest(manifest_path: Path) -> dict[str, dict[str, Any]]:
         return {}
     result: dict[str, dict[str, Any]] = {}
     for row in rows:
-        filename = (row.get("filename") or "").strip()
+        filename = _basename((row.get("filename") or "").strip())
         if filename:
             result[filename] = _row_metadata(row)
     return result
