@@ -11,10 +11,12 @@ path segment under the root is used as the category.
 
 This is a thin CLI over :class:`industryiq.core.ingestion.IngestionService` --
 the *same* code the scheduled job runs in the live service. It writes through the
-configured pipeline (Milvus when ``VECTOR_BACKEND=milvus``, else pgvector/
-in-memory) and is idempotent: a re-run skips unchanged files and replaces changed
-ones, tracked in the manifest. The manifest is durable only with ``DATABASE_URL``
-set; without it the run still works but each run re-ingests the whole tree.
+configured pipeline (Milvus when ``VECTOR_BACKEND=milvus``; *both* pgvector and
+Milvus when ``=both``, to load one corpus into both for benchmarking; else
+pgvector/in-memory) and is idempotent: a re-run skips unchanged files and replaces
+changed ones, tracked in the manifest. The manifest is durable only with
+``DATABASE_URL`` set; without it the run still works but each run re-ingests the
+whole tree.
 
 Run with the SAME ``RAG_PROVIDER`` as the server, so the ingest-time and
 query-time embedders match (a 384-dim local embedder and 1024-dim Titan are not

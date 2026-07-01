@@ -1,6 +1,11 @@
 import pytest
 
-from industryiq.core.vectorstore import InMemoryVectorStore, VectorStore, cosine_similarity
+from industryiq.core.vectorstore import (
+    InMemoryVectorStore,
+    MultiVectorStore,
+    VectorStore,
+    cosine_similarity,
+)
 
 
 def test_cosine_of_zero_vector_is_zero() -> None:
@@ -97,3 +102,36 @@ def test_delete_by_source_removes_only_matching_chunks() -> None:
 
 def test_delete_by_source_unknown_source_is_noop() -> None:
     assert _seeded_store().delete_by_source("missing.pdf") == 0
+
+
+def test_multi_store_satisfies_interface() -> None:
+    assert isinstance(MultiVectorStore([InMemoryVectorStore()]), VectorStore)
+
+
+def test_multi_store_rejects_no_backends() -> None:
+    with pytest.raises(ValueError):
+        MultiVectorStore([])
+
+
+def test_multi_store_fans_writes_out_to_every_backend() -> None:
+    a, b = InMemoryVectorStore(), InMemoryVectorStore()
+    multi = MultiVectorStore([a, b])
+    multi.upsert(["x"], [[1.0, 0.0]], [{"text": "X", "source": "x.pdf"}])
+    assert dict(a.all_items()) == dict(b.all_items()) == {"x": {"text": "X", "source": "x.pdf"}}
+
+
+def test_multi_store_reads_from_primary_only() -> None:
+    primary, secondary = InMemoryVectorStore(), InMemoryVectorStore()
+    primary.upsert(["p"], [[1.0, 0.0]], [{"text": "P"}])
+    secondary.upsert(["s"], [[1.0, 0.0]], [{"text": "S"}])
+    multi = MultiVectorStore([primary, secondary])
+    assert [hit.id for hit in multi.search([1.0, 0.0], k=5)] == ["p"]
+    assert {id_ for id_, _ in multi.all_items()} == {"p"}
+
+
+def test_multi_store_delete_fans_out_and_reports_primary_count() -> None:
+    a, b = InMemoryVectorStore(), InMemoryVectorStore()
+    multi = MultiVectorStore([a, b])
+    multi.upsert(["x"], [[1.0, 0.0]], [{"text": "X", "source": "x.pdf"}])
+    assert multi.delete_by_source("x.pdf") == 1
+    assert a.all_items() == b.all_items() == []

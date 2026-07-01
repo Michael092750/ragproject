@@ -43,7 +43,7 @@ from industryiq.core.ingestion.adapters.store_pg import PgIngestStateStore
 from industryiq.core.pgvectorstore import PgVectorStore
 from industryiq.core.pipeline import RagPipeline
 from industryiq.core.retrieval import Retriever
-from industryiq.core.vectorstore import InMemoryVectorStore, VectorStore
+from industryiq.core.vectorstore import InMemoryVectorStore, MultiVectorStore, VectorStore
 
 
 def _build_ai_providers(settings: Settings) -> tuple[Embedder, GenerativeLLM]:
@@ -80,23 +80,39 @@ def _build_ai_providers(settings: Settings) -> tuple[Embedder, GenerativeLLM]:
     return FakeEmbedder(), FakeLLM()
 
 
-def _build_vector_store(settings: Settings, dim: int) -> VectorStore:
-    """Choose the vector store: Milvus, persistent Postgres, or in-memory (default).
+def _build_milvus_store(settings: Settings, dim: int) -> VectorStore:
+    """Build the Milvus store. The pymilvus import is deferred so it loads only
+    when Milvus is actually selected."""
+    from industryiq.core.milvusvectorstore import MilvusVectorStore
 
-    ``VECTOR_BACKEND=milvus`` routes the live app to Milvus; otherwise the store
-    is Postgres+pgvector when ``DATABASE_URL`` is set, else in-memory. pgvector is
-    deliberately kept available so it can be benchmarked against Milvus. The
-    pymilvus import is deferred so it loads only when Milvus is selected.
+    return MilvusVectorStore(
+        settings.milvus_uri,
+        dim=dim,
+        collection=settings.milvus_collection,
+        token=settings.milvus_token,
+        index_type=settings.milvus_index_type,
+    )
+
+
+def _build_vector_store(settings: Settings, dim: int) -> VectorStore:
+    """Choose the vector store: Milvus, both (fan-out), persistent Postgres, or
+    in-memory (default).
+
+    ``VECTOR_BACKEND=milvus`` routes the live app to Milvus; ``=both`` fans writes
+    out to *both* pgvector and Milvus (one ingest loads both for a like-for-like
+    benchmark, reads served from pgvector -- see :class:`MultiVectorStore`);
+    otherwise the store is Postgres+pgvector when ``DATABASE_URL`` is set, else
+    in-memory. pgvector is deliberately kept available so it can be benchmarked
+    against Milvus.
     """
     if settings.vector_backend == "milvus":
-        from industryiq.core.milvusvectorstore import MilvusVectorStore
-
-        return MilvusVectorStore(
-            settings.milvus_uri,
-            dim=dim,
-            collection=settings.milvus_collection,
-            token=settings.milvus_token,
-            index_type=settings.milvus_index_type,
+        return _build_milvus_store(settings, dim)
+    if settings.vector_backend == "both":
+        if not settings.database_url:
+            raise ValueError("VECTOR_BACKEND=both requires DATABASE_URL (for the pgvector leg)")
+        # pgvector first => it is the read/primary backend; Milvus is write-only here.
+        return MultiVectorStore(
+            [PgVectorStore(settings.database_url, dim=dim), _build_milvus_store(settings, dim)]
         )
     if settings.database_url:
         return PgVectorStore(settings.database_url, dim=dim)

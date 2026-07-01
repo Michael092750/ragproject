@@ -48,6 +48,31 @@ class Settings:
     # any failure) or "pypdf" (fast pure-Python text, no fallback). Ingestion is
     # an offline batch, so the slower default is worth the chunk-quality win.
     pdf_parser: str = "docling"
+    # Whether Docling runs OCR while parsing PDFs (on by default, so text in
+    # scanned pages and chart/figure bitmaps is captured). Set DOCLING_OCR=0 to
+    # skip OCR for a faster born-digital-only ingest.
+    #
+    # When on, RapidOCR's detection step is forced to limit_type=max so a large
+    # embedded bitmap is downscaled (to RapidOCR's internal 2000px ceiling) before
+    # inference. Its default (limit_type=min) only ever upscales, so a full-size
+    # chart bitmap stays huge and OOMs the ONNX detection tensor (std::bad_alloc).
+    # 2000 is the floor RapidOCR allows in max mode -- it can't be set lower.
+    docling_ocr: bool = True
+    # How many PDF pages Docling rasterizes/processes concurrently. Its default
+    # (4) renders four page images at once; on pages with large media (foldout
+    # charts, big embedded figures) that 4x concurrency can exhaust memory and
+    # fail the whole page with std::bad_alloc -- and a failed page drops its text
+    # too, not just its OCR. 1 serializes page processing for the lowest memory
+    # footprint (ingestion is an offline batch, so the slowdown is acceptable);
+    # raise it on a roomy machine to ingest faster.
+    docling_page_batch_size: int = 1
+    # OCR render resolution, as a multiple of 72 DPI (Docling renders each OCR page
+    # region at this x1.5 internally). Docling hardcodes 3 (=216 DPI, x1.5=324 DPI
+    # actual) -- high enough that the renders pile up and OOM/SIGSEGV the process on
+    # large reports. 2 cuts OCR memory ~2.3x with little quality loss; 1 (108 DPI)
+    # is ~9x lighter but weaker on small text. Applied by patching RapidOcrModel,
+    # since the scale is not exposed through Docling's OCR options.
+    docling_ocr_scale: int = 2
 
     # AI provider: "fake" (offline default), "anthropic" (local: Anthropic API
     # key + a local CPU embedder), or "bedrock" (real Amazon Bedrock on AWS).
@@ -110,6 +135,9 @@ def get_settings() -> Settings:
         database_url=os.getenv("DATABASE_URL"),
         vector_backend=os.getenv("VECTOR_BACKEND", "pgvector"),
         pdf_parser=os.getenv("PDF_PARSER", "docling"),
+        docling_ocr=_env_bool("DOCLING_OCR", True),
+        docling_page_batch_size=int(os.getenv("DOCLING_PAGE_BATCH_SIZE", "1")),
+        docling_ocr_scale=int(os.getenv("DOCLING_OCR_SCALE", "2")),
         milvus_uri=os.getenv("MILVUS_URI", "http://localhost:19530"),
         milvus_token=os.getenv("MILVUS_TOKEN"),
         milvus_collection=os.getenv("MILVUS_COLLECTION", "chunks"),

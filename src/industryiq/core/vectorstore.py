@@ -7,6 +7,7 @@ tests.
 """
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
@@ -103,3 +104,54 @@ class InMemoryVectorStore(VectorStore):
             del self._vectors[id_]
             del self._metadatas[id_]
         return len(ids)
+
+
+class MultiVectorStore(VectorStore):
+    """Fan-out vector store: writes to every backend, reads from the first.
+
+    Wraps several :class:`VectorStore` backends so a single ingest run lands
+    *identical* data in all of them -- same ids, vectors, and metadata, embedded
+    only once upstream by the :class:`~industryiq.core.retrieval.Retriever`. The
+    point is benchmarking: load pgvector and Milvus from one bulk-ingest so the
+    two query sides can be compared against the same corpus, with one shared
+    ingestion manifest (every backend sees every file, so dedup stays correct).
+
+    Writes (``upsert``, ``delete_by_source``) fan out to all backends, in order.
+    Reads (``search``, ``all_items``) go to the *primary* (the first backend)
+    only, so the query path is unambiguous -- once both are loaded, benchmark a
+    backend's query side by pointing the app straight at it
+    (``VECTOR_BACKEND=pgvector`` / ``=milvus``); the primary here just keeps the
+    app functional while in fan-out mode.
+
+    Fan-out is not transactional: if a backend fails mid-``upsert`` the others may
+    already have the chunk, leaving backends out of sync. For a clean benchmark,
+    load into empty collections and re-run on failure (the manifest only commits a
+    file once its fan-out fully succeeds).
+    """
+
+    def __init__(self, stores: Sequence[VectorStore]) -> None:
+        if not stores:
+            raise ValueError("MultiVectorStore needs at least one backend")
+        self._stores: tuple[VectorStore, ...] = tuple(stores)
+        self._primary = self._stores[0]
+
+    def upsert(
+        self,
+        ids: list[str],
+        vectors: list[list[float]],
+        metadatas: list[dict[str, Any]],
+    ) -> None:
+        for store in self._stores:
+            store.upsert(ids, vectors, metadatas)
+
+    def search(self, query: list[float], k: int = 5, *, query_text: str | None = None) -> list[Hit]:
+        return self._primary.search(query, k=k, query_text=query_text)
+
+    def all_items(self, limit: int = 100) -> list[tuple[str, dict[str, Any]]]:
+        return self._primary.all_items(limit=limit)
+
+    def delete_by_source(self, source: str) -> int:
+        # Fan out to every backend; report the primary's count (they should agree
+        # when the backends are in sync).
+        counts = [store.delete_by_source(source) for store in self._stores]
+        return counts[0]

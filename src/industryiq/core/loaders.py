@@ -77,22 +77,68 @@ def _load_pdf_pages_pypdf(p: Path) -> list[str]:
 _docling_converter: Any = None
 
 
+def _patch_rapidocr_scale(scale: int) -> None:
+    """Lower the resolution at which Docling renders page regions for OCR.
+
+    Docling's RapidOCR stage hardcodes ``self.scale = 3`` (216 DPI, then x1.5 =
+    324 DPI) and exposes no option to change it, so those high-res renders pile up
+    and OOM/SIGSEGV the process on large reports. We patch the model class once to
+    set a lower scale. Best-effort: if Docling's internals have shifted, we log and
+    leave the default rather than break ingestion.
+    """
+    try:  # pragma: no cover - needs the heavy extra
+        from docling.models.stages.ocr import rapid_ocr_model
+
+        if getattr(rapid_ocr_model.RapidOcrModel, "_iiq_scale_patched", False):
+            return
+        _orig_init = rapid_ocr_model.RapidOcrModel.__init__
+
+        def _scaled_init(self: Any, *args: Any, **kwargs: Any) -> None:
+            _orig_init(self, *args, **kwargs)
+            self.scale = scale
+
+        rapid_ocr_model.RapidOcrModel.__init__ = _scaled_init
+        rapid_ocr_model.RapidOcrModel._iiq_scale_patched = True
+    except Exception as exc:  # noqa: BLE001 -- Docling internals can shift across versions
+        logger.warning("Could not lower RapidOCR render scale (%s); using its default.", exc)
+
+
 def _get_docling_converter() -> Any:
     """Return a cached Docling ``DocumentConverter``, built on first use.
 
-    Raises a pointed error if the optional ``docling`` extra isn't installed,
-    rather than the bare ``ModuleNotFoundError`` the import would otherwise give.
+    OCR is on by default (``DOCLING_OCR``). RapidOCR's detection step is forced to
+    limit_type=max so a large embedded bitmap is downscaled (to RapidOCR's internal
+    2000px ceiling) before inference -- its default (limit_type=min) only upscales,
+    so a full-size chart bitmap grows the ONNX tensor until it OOMs
+    (``std::bad_alloc``). Raises a pointed error if the optional ``docling`` extra
+    isn't installed, rather than the bare ``ModuleNotFoundError`` the import gives.
     """
     global _docling_converter
     if _docling_converter is None:
         try:
-            from docling.document_converter import DocumentConverter
+            from docling.datamodel.base_models import InputFormat
+            from docling.datamodel.pipeline_options import PdfPipelineOptions, RapidOcrOptions
+            from docling.datamodel.settings import settings as docling_settings
+            from docling.document_converter import DocumentConverter, PdfFormatOption
         except ModuleNotFoundError as exc:
             raise ModuleNotFoundError(
                 "PDF_PARSER='docling' needs the optional 'docling' dependency; "
                 "install it with:  pip install 'industryiq[docling]'"
             ) from exc
-        _docling_converter = DocumentConverter()  # pragma: no cover - needs the heavy extra
+        settings = get_settings()  # pragma: no cover - needs the heavy extra
+        # Serialize page rasterization to cap peak memory; the default (4 pages at
+        # once) can OOM the whole page on large media, dropping its text too.
+        docling_settings.perf.page_batch_size = settings.docling_page_batch_size
+        if settings.docling_ocr:
+            _patch_rapidocr_scale(settings.docling_ocr_scale)
+        pipeline_options = PdfPipelineOptions()
+        pipeline_options.do_ocr = settings.docling_ocr
+        # Force the detection step to downscale large bitmaps; RapidOCR's default
+        # (limit_type=min) never shrinks them, so a full-size chart bitmap OOMs.
+        pipeline_options.ocr_options = RapidOcrOptions(rapidocr_params={"Det.limit_type": "max"})
+        _docling_converter = DocumentConverter(
+            format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
+        )
     return _docling_converter
 
 
